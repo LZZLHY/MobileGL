@@ -12328,6 +12328,21 @@ void main() {
                         VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME, VK_KHR_ANDROID_SURFACE_EXTENSION_NAME);
                 exts.push_back(VK_KHR_ANDROID_SURFACE_EXTENSION_NAME);
             }
+#elif defined VK_USE_PLATFORM_OHOS
+            // Same policy as the Xlib branch below: an offscreen surface either
+            // comes from VK_EXT_headless_surface or is an honest bring-up failure.
+            // No window-object fallback is built here - the on-screen path always
+            // receives its OHNativeWindow from the host through the EGL front end,
+            // and nothing on the Minecraft path ever asks for a pbuffer context.
+            m_headlessSurfaceSupported = IsExtensionSupported(m_extensions, VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME);
+            if (!m_headlessSurfaceSupported) {
+                MGLOG_F("%s is not available from this Vulkan loader, so an offscreen (pbuffer) DirectVulkan "
+                        "surface cannot be created on OpenHarmony. The on-screen path is unaffected: it gets "
+                        "its OHNativeWindow through eglCreateWindowSurface.",
+                        VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME);
+                throw RuntimeError("VK_EXT_headless_surface is unavailable for an offscreen DirectVulkan surface");
+            }
+            exts.push_back(VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME);
 #elif defined VK_USE_PLATFORM_XLIB_KHR
             // An offscreen surface has ZERO window-system dependence, by design and on
             // every machine - including ones that do have a display. There used to be a
@@ -12353,6 +12368,8 @@ void main() {
         } else {
 #ifdef VK_USE_PLATFORM_ANDROID_KHR
             exts.push_back(VK_KHR_ANDROID_SURFACE_EXTENSION_NAME);
+#elif defined VK_USE_PLATFORM_OHOS
+            exts.push_back(VK_OHOS_SURFACE_EXTENSION_NAME);
 #elif defined VK_USE_PLATFORM_WIN32_KHR
             exts.push_back(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
 #elif defined VK_USE_PLATFORM_METAL_EXT
@@ -13567,6 +13584,17 @@ void main() {
         VkAndroidSurfaceCreateInfoKHR sci{VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR};
         sci.window = nativeWindow;
         VK_VERIFY(vkCreateAndroidSurfaceKHR(m_instance, &sci, nullptr, &m_surface), "vkCreateAndroidSurfaceKHR failed");
+#elif defined VK_USE_PLATFORM_OHOS
+        // NativeWindowType is khronos_uintptr_t on OHOS (eglplatform.h's generic
+        // __unix__ branch), carrying the host's OHNativeWindow pointer value.
+        // The window stays owned by the caller for the whole surface lifetime -
+        // there is nothing platform-side to release in the destructor.
+        auto* nativeWindow = reinterpret_cast<OHNativeWindow*>(m_window);
+        if (!nativeWindow) throw RuntimeError("OHNativeWindow is null");
+
+        VkSurfaceCreateInfoOHOS sci{VK_STRUCTURE_TYPE_SURFACE_CREATE_INFO_OHOS};
+        sci.window = nativeWindow;
+        VK_VERIFY(vkCreateSurfaceOHOS(m_instance, &sci, nullptr, &m_surface), "vkCreateSurfaceOHOS failed");
 #elif defined VK_USE_PLATFORM_WIN32_KHR
         auto hwnd = static_cast<HWND>(m_window);
         MOBILEGL_ASSERT(hwnd, "HWND is null");
