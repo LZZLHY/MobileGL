@@ -15,6 +15,13 @@ namespace MobileGL {
     struct Error {
         ErrorCode code;
         UniquePtr<ErrorInfo> info;
+
+        // Explicit constructors: make_unique<Error>(code, info) relies on
+        // parenthesized aggregate initialisation (P0960R3, C++20), which clang 15
+        // does not implement (e.g. the OpenHarmony SDK toolchain). Semantics are
+        // identical to the aggregate form; a no-op for clang 16+.
+        Error() = default;
+        Error(ErrorCode c, UniquePtr<ErrorInfo> i) : code(c), info(std::move(i)) {}
     };
 
     namespace MG_State::GLState {

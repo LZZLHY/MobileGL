@@ -90,6 +90,18 @@ namespace MobileGL::MG_Impl::GLImpl {
             SharedPtr<MG_State::GLState::ITextureObject> colorAttachment;
             SharedPtr<MG_State::GLState::ITextureObject> depthAttachment;
             SharedPtr<MG_State::GLState::ITextureObject> stencilAttachment;
+
+            // Explicit constructors: make_unique<DefaultFramebufferInfo>(...) relies on
+            // parenthesized aggregate initialisation (P0960R3, C++20), which clang 15
+            // does not implement (e.g. the OpenHarmony SDK toolchain). Semantics are
+            // identical to the aggregate form; a no-op for clang 16+.
+            DefaultFramebufferInfo() = default;
+            DefaultFramebufferInfo(SharedPtr<MG_State::GLState::FramebufferObject> fbo,
+                                   SharedPtr<MG_State::GLState::ITextureObject> color,
+                                   SharedPtr<MG_State::GLState::ITextureObject> depth,
+                                   SharedPtr<MG_State::GLState::ITextureObject> stencil)
+                : defaultFBO(std::move(fbo)), colorAttachment(std::move(color)),
+                  depthAttachment(std::move(depth)), stencilAttachment(std::move(stencil)) {}
         };
 
         extern UniquePtr<DefaultFramebufferInfo>& pDefaultFramebufferInfo;

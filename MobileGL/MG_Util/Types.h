@@ -149,6 +149,14 @@ namespace MobileGL {
         SizeT start = 0;
         SizeT end = ~SizeT(0);
 
+        // Explicit constructors: `Range1D(a, b)` relies on parenthesized aggregate
+        // initialisation (P0960R3, C++20), which clang 15 does not implement
+        // (__cpp_aggregate_paren_init is absent - e.g. the OpenHarmony SDK
+        // toolchain). Semantics are identical to the aggregate form; a no-op
+        // for clang 16+.
+        Range1D() = default;
+        constexpr Range1D(SizeT s, SizeT e) : start(s), end(e) {}
+
         void Update(SizeT newStart, SizeT newEnd) {
             MOBILEGL_ASSERT(newStart <= newEnd, "Range1D::Update: newStart (%zu) > newEnd (%zu)", newStart, newEnd);
             start = newStart;
