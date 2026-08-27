@@ -652,6 +652,17 @@ if (MOBILEGL_OHOS)
     # libc++.a nor the shared libc++. Without this the link fails at exactly
     # those three symbols (measured with OHOS_STL=c++_static).
     target_link_libraries(${CMAKE_PROJECT_NAME} PUBLIC c++experimental)
+
+    # Keep the dynamic-symbol surface to the intended loader API (egl* / gl*,
+    # all tagged MOBILEGL_EXPORT with explicit default visibility). Without
+    # this every statically linked archive - glslang, SPIRV-Tools,
+    # SPIRV-Cross, xxHash, and the static libc++ itself - re-exports its
+    # symbols from the DSO (measured: 10801 mangled C++ exports). This is the
+    # same concern the APPLE block below solves with -exported_symbols_list:
+    # a host process can carry its own incompatible copies of those libraries
+    # (Minecraft loads lwjgl-shaderc / lwjgl-spvc natives embedding glslang
+    # and SPIRV-Cross), and default visibility lets the copies interpose.
+    target_link_options(${CMAKE_PROJECT_NAME} PRIVATE "LINKER:--exclude-libs,ALL")
 endif()
 
 if (APPLE AND NOT MOBILEGL_IOS)
