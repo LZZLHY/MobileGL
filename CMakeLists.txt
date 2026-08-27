@@ -97,6 +97,31 @@ if (ANDROID)
     unset(_mobilegl_api_triple)
 endif()
 
+# ---------------- OpenHarmony (OHOS) ----------------
+# The OHOS SDK toolchain (ohos.toolchain.cmake) sets CMAKE_SYSTEM_NAME to
+# "OHOS". CMake does not know that name, so none of the built-in platform
+# variables (UNIX, ANDROID, ...) are set for it; everything OHOS-specific in
+# this file keys off this one variable.
+if (CMAKE_SYSTEM_NAME STREQUAL "OHOS")
+    set(MOBILEGL_OHOS TRUE)
+else()
+    set(MOBILEGL_OHOS FALSE)
+endif()
+
+if (MOBILEGL_OHOS)
+    # Same policy as the ANDROID block above: device builds ship the library only.
+    set(MOBILEGL_BUILD_TEST       OFF CACHE BOOL "Build MobileGL tests"      FORCE)
+    set(MOBILEGL_BUILD_BENCHMARK  OFF CACHE BOOL "Build MobileGL benchmarks" FORCE)
+
+    # libc++ 15 (as shipped in the OHOS SDK) carries a complete <format>
+    # implementation but keeps it behind _LIBCPP_HAS_NO_INCOMPLETE_FORMAT
+    # unless the experimental surface is enabled. With this definition
+    # MobileGL's std::format usage compiles AND links against the SDK's
+    # shipped libc++ runtime (measured; the symbols it needs, including
+    # std::format_error's destructor, are all exported by that runtime).
+    add_compile_definitions(_LIBCPP_ENABLE_EXPERIMENTAL)
+endif()
+
 option(MOBILEGL_ENABLE_LTO "Build with ThinLTO/IPO" OFF)
 
 if ((NOT CMAKE_BUILD_TYPE STREQUAL "Debug" OR MOBILEGL_FORCE_RELEASE_OPT) AND MOBILEGL_ENABLE_LTO)
@@ -317,10 +342,6 @@ set(SOURCE_FILES
     MobileGL/MG_Util/Texture/PixelStoreProcessor.cpp
     MobileGL/MG_Util/Texture/TextureFormatProcessor.cpp
 
-    MobileGL/MG_Impl/GLXImpl/Exporting/Definitions.cpp
-    MobileGL/MG_Impl/GLXImpl/GLXImpl.cpp
-    MobileGL/MG_Impl/GLXImpl/LookUp/LookUp.cpp
-
     MobileGL/MG_Impl/EGLImpl/Exporting/Definitions.cpp
     MobileGL/MG_Impl/EGLImpl/EGLImpl.cpp
     
@@ -413,6 +434,20 @@ set(SOURCE_FILES
     MobileGL/MG_State/GLState/RenderbufferState/RenderbufferObject.cpp
     MobileGL/MG_State/GLState/RenderbufferState/RenderbufferState.cpp
 )
+
+# The GLX front end is only meaningful where X11 exists. Its sources gate
+# themselves on __linux__ && !__ANDROID__, which also matches OHOS (the OHOS
+# toolchain predefines __linux__ but the platform has no X11), so the front
+# end is selected at the build-system level like the CGL/WGL blocks below.
+# NOT MOBILEGL_OHOS is spelled out even though CMake leaves UNIX unset for
+# the unknown system name "OHOS" - intent over accident.
+if (UNIX AND NOT APPLE AND NOT ANDROID AND NOT MOBILEGL_OHOS)
+    list(APPEND SOURCE_FILES
+        MobileGL/MG_Impl/GLXImpl/Exporting/Definitions.cpp
+        MobileGL/MG_Impl/GLXImpl/GLXImpl.cpp
+        MobileGL/MG_Impl/GLXImpl/LookUp/LookUp.cpp
+    )
+endif()
 
 if (APPLE AND NOT MOBILEGL_IOS)
     list(APPEND SOURCE_FILES
@@ -521,7 +556,10 @@ target_compile_definitions(${CMAKE_PROJECT_NAME}
         $<$<BOOL:${MOBILEGL_TRACE_ANGLE_VARIANTS}>:MOBILEGL_TRACE_ANGLE_VARIANTS=1>
 )
 
-if(UNIX AND NOT APPLE AND NOT ANDROID)
+# NOT MOBILEGL_OHOS: an OHOS application package must never carry a file named
+# libEGL.so - it would shadow the system EGL for every library in the package.
+# (UNIX is already unset for OHOS; the condition documents the intent.)
+if(UNIX AND NOT APPLE AND NOT ANDROID AND NOT MOBILEGL_OHOS)
     foreach(MOBILEGL_LOADER_ALIAS
             libEGL.so libEGL.so.1)
         add_custom_command(TARGET ${CMAKE_PROJECT_NAME} POST_BUILD
@@ -545,7 +583,10 @@ if(WIN32)
     )
 endif()
 
-if(NOT ANDROID)
+# NOT MOBILEGL_OHOS for the same reason as NOT ANDROID: a device build ships
+# the shared library only, and the static twin doubles the compile for a
+# target nothing consumes.
+if(NOT ANDROID AND NOT MOBILEGL_OHOS)
     add_library(${CMAKE_PROJECT_NAME}_s STATIC 
         ${SOURCE_FILES}
     )
@@ -582,9 +623,12 @@ endif()
 
 if (TRACY_ENABLE)
     target_link_libraries(${CMAKE_PROJECT_NAME} PUBLIC Tracy::TracyClient)
-    target_link_libraries(${CMAKE_PROJECT_NAME}_s PUBLIC Tracy::TracyClient)
     target_compile_definitions(${CMAKE_PROJECT_NAME} PUBLIC -DTRACY_ENABLE)
-    target_compile_definitions(${CMAKE_PROJECT_NAME}_s PUBLIC -DTRACY_ENABLE)
+    # The static twin does not exist on ANDROID/OHOS device builds.
+    if (TARGET ${CMAKE_PROJECT_NAME}_s)
+        target_link_libraries(${CMAKE_PROJECT_NAME}_s PUBLIC Tracy::TracyClient)
+        target_compile_definitions(${CMAKE_PROJECT_NAME}_s PUBLIC -DTRACY_ENABLE)
+    endif()
 endif ()
 
 if (ANDROID)
@@ -593,6 +637,14 @@ if (ANDROID)
         log
         vulkan
     )
+endif()
+
+if (MOBILEGL_OHOS)
+    # Vulkan entry points are link-time references (same as the ANDROID block
+    # above); the OHOS SDK sysroot provides libvulkan.so. Vulkan HEADERS keep
+    # coming from 3rdparty/Vulkan-Headers through the Vulkan::UtilityHeaders
+    # link interface, exactly like every other platform.
+    target_link_libraries(${CMAKE_PROJECT_NAME} PUBLIC vulkan)
 endif()
 
 if (APPLE AND NOT MOBILEGL_IOS)
@@ -650,7 +702,10 @@ if (APPLE AND MOBILEGL_IOS)
     endif()
 endif()
 
-if (NOT ANDROID AND NOT MOBILEGL_IOS)
+# NOT MOBILEGL_OHOS: the OHOS block above links the sysroot libvulkan.so
+# directly. Letting find_package(Vulkan) run there would inject the sysroot's
+# (older) Vulkan headers ahead of the pinned 3rdparty/Vulkan-Headers.
+if (NOT ANDROID AND NOT MOBILEGL_IOS AND NOT MOBILEGL_OHOS)
     find_package(Vulkan)
     if (Vulkan_FOUND)
         target_link_libraries(${CMAKE_PROJECT_NAME} PUBLIC Vulkan::Vulkan Vulkan::Headers)
