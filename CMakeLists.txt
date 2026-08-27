@@ -645,6 +645,13 @@ if (MOBILEGL_OHOS)
     # coming from 3rdparty/Vulkan-Headers through the Vulkan::UtilityHeaders
     # link interface, exactly like every other platform.
     target_link_libraries(${CMAKE_PROJECT_NAME} PUBLIC vulkan)
+
+    # Pairs with the _LIBCPP_ENABLE_EXPERIMENTAL definition above: on
+    # libc++ 15 the <format> RUNTIME pieces (std::format_error's destructor,
+    # typeinfo and vtable) live in libc++experimental.a - they are in neither
+    # libc++.a nor the shared libc++. Without this the link fails at exactly
+    # those three symbols (measured with OHOS_STL=c++_static).
+    target_link_libraries(${CMAKE_PROJECT_NAME} PUBLIC c++experimental)
 endif()
 
 if (APPLE AND NOT MOBILEGL_IOS)
