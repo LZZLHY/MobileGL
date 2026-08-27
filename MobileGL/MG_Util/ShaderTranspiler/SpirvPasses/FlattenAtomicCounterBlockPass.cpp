@@ -199,7 +199,14 @@ namespace MobileGL {
                     std::unordered_map<uint32_t, std::vector<Instruction*>> chainsByStruct;
                     std::unordered_set<uint32_t> undoableStructs;
                     for (const auto& [variableId, structId] : variableToStruct) {
-                        defUseMgr->ForEachUser(defUseMgr->GetDef(variableId), [&](Instruction* user) {
+                        // Copy the structured bindings into plain locals before the lambda:
+                        // capturing a structured binding requires P1091R3 (C++20), which
+                        // clang 15 does not implement ("reference to local binding declared
+                        // in enclosing function" - e.g. the OpenHarmony SDK toolchain).
+                        // Semantically identical, and a no-op for clang 16+.
+                        const uint32_t capturedVariableId = variableId;
+                        const uint32_t capturedStructId = structId;
+                        defUseMgr->ForEachUser(defUseMgr->GetDef(capturedVariableId), [&](Instruction* user) {
                             switch (user->opcode()) {
                             case spv::Op::OpName:
                             case spv::Op::OpDecorate:
@@ -209,14 +216,14 @@ namespace MobileGL {
                             case spv::Op::OpAccessChain:
                             case spv::Op::OpInBoundsAccessChain:
                                 if (user->NumInOperands() >= 2 &&
-                                    user->GetSingleWordInOperand(0) == variableId) {
-                                    chainsByStruct[structId].push_back(user);
+                                    user->GetSingleWordInOperand(0) == capturedVariableId) {
+                                    chainsByStruct[capturedStructId].push_back(user);
                                     return;
                                 }
-                                undoableStructs.insert(structId);
+                                undoableStructs.insert(capturedStructId);
                                 return;
                             default:
-                                undoableStructs.insert(structId);
+                                undoableStructs.insert(capturedStructId);
                                 return;
                             }
                         });
