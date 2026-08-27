@@ -63,6 +63,11 @@ namespace MobileGL::MG_Impl::EGLImpl {
             return MG_Backend::WindowBackend::MetalLayer;
 #elif defined(_WIN32)
             return MG_Backend::WindowBackend::Win32;
+#elif defined(__OHOS__)
+            // Before __linux__: the OHOS toolchain predefines both, and falling
+            // into the X11 label would pass the backends' validity checks by
+            // accident - until something switches on X11 semantics.
+            return MG_Backend::WindowBackend::OHOS;
 #elif defined(__linux__)
             return MG_Backend::WindowBackend::X11;
 #else

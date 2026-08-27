@@ -495,6 +495,7 @@ namespace MobileGL {
             X11,
             MetalLayer,
             Win32, // Handle is an HWND
+            OHOS,  // Handle is an OHNativeWindow*
             // TODO: Wayland, etc.
             WindowBackendCount,
             Unknown = -1
