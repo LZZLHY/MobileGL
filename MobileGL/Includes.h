@@ -39,6 +39,9 @@
 #include <numeric>
 #include <expected>
 #include <iostream>
+// Not transitively provided by <iostream> on every standard library (libc++ 15
+// does not pull it in), and MobileGL uses std::*stringstream directly in many TUs.
+#include <sstream>
 #include <optional>
 #include <algorithm>
 #include <stdexcept>
