@@ -113,6 +113,14 @@
 #define VK_USE_PLATFORM_WIN32_KHR
 #elif defined(__APPLE__)
 #define VK_USE_PLATFORM_METAL_EXT
+#elif defined(__OHOS__)
+// OpenHarmony. Must be tested BEFORE __linux__: the OHOS toolchain predefines
+// both __OHOS__ and __linux__, and the __linux__ branch selects
+// VK_USE_PLATFORM_XLIB_KHR, whose vulkan_xlib.h includes <X11/Xlib.h> - which
+// does not exist on OHOS. The OHOS window-system extension is VK_OHOS_surface
+// (gate macro VK_USE_PLATFORM_OHOS, no _KHR suffix); vulkan_ohos.h is provided
+// both by Vulkan-Headers and by the OHOS SDK sysroot.
+#define VK_USE_PLATFORM_OHOS
 #elif defined(__linux__)
 #define VK_USE_PLATFORM_XLIB_KHR
 typedef struct _XDisplay Display;
