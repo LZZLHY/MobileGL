@@ -71,6 +71,9 @@
 #define MOBILEGL_LOG_ENABLE_CONSOLE 0
 #define MOBILEGL_LOG_ENABLE_FILE 1
 #define MOBILEGL_LOG_ENABLE_ANDROID 1
+// OpenHarmony's system log (hilog), the logcat equivalent. Gated separately
+// from MOBILEGL_LOG_ENABLE_ANDROID so either sink can be silenced on its own.
+#define MOBILEGL_LOG_ENABLE_HILOG 1
 #define MOBILEGL_ENABLE_SCOPE_MARKER 0
 
 // Require C++23

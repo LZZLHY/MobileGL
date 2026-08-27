@@ -8,6 +8,10 @@
 
 #include "../../Includes.h"
 
+#if MOBILEGL_LOG_ENABLE_HILOG && defined(__OHOS__)
+#include <hilog/log.h>
+#endif
+
 namespace MobileGL {
     namespace MG_Util::Debug {
         static FILE* s_logFile = nullptr;
@@ -24,6 +28,9 @@ namespace MobileGL {
             return (char*)"Android";
 #elif defined(__APPLE__)
             return (char*)"macOS";
+#elif defined(__OHOS__)
+            // Before __linux__: the OHOS toolchain predefines both.
+            return (char*)"OpenHarmony";
 #elif defined(__linux__)
             return (char*)"Linux";
 #else
@@ -122,6 +129,24 @@ namespace MobileGL {
             // diagnostics read (android-plugin/trace-replay-ci.sh).
             __android_log_print(androidLogLevel, "MobileGL", "%.*s", static_cast<int>(out.size() - 1),
                                 out.c_str());
+#endif
+
+#if MOBILEGL_LOG_ENABLE_HILOG && defined(__OHOS__)
+            // hilog terminates records itself, same as logcat: hand it the string
+            // without the trailing newline the file sink needs. %{public} is
+            // required - hilog redacts a plain %s to <private>.
+            {
+                LogLevel hilogLevel;
+                switch (androidLogLevel) {
+                case ANDROID_LOG_DEBUG: hilogLevel = LOG_DEBUG; break;
+                case ANDROID_LOG_WARN:  hilogLevel = LOG_WARN;  break;
+                case ANDROID_LOG_ERROR: hilogLevel = LOG_ERROR; break;
+                case ANDROID_LOG_FATAL: hilogLevel = LOG_FATAL; break;
+                default:                hilogLevel = LOG_INFO;  break;
+                }
+                OH_LOG_Print(LOG_APP, hilogLevel, 0x0000, "MobileGL", "%{public}.*s",
+                             static_cast<int>(out.size() - 1), out.c_str());
+            }
 #endif
 
             WriteToFile(out.c_str());

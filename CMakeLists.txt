@@ -641,10 +641,12 @@ endif()
 
 if (MOBILEGL_OHOS)
     # Vulkan entry points are link-time references (same as the ANDROID block
-    # above); the OHOS SDK sysroot provides libvulkan.so. Vulkan HEADERS keep
-    # coming from 3rdparty/Vulkan-Headers through the Vulkan::UtilityHeaders
-    # link interface, exactly like every other platform.
-    target_link_libraries(${CMAKE_PROJECT_NAME} PUBLIC vulkan)
+    # above); the OHOS SDK sysroot provides libvulkan.so - including
+    # vkCreateSurfaceOHOS (verified exported). Vulkan HEADERS keep coming from
+    # 3rdparty/Vulkan-Headers through the Vulkan::UtilityHeaders link
+    # interface, exactly like every other platform. hilog_ndk.z is the system
+    # log sink (Log.cpp), the OHOS counterpart of ANDROID's liblog.
+    target_link_libraries(${CMAKE_PROJECT_NAME} PUBLIC vulkan hilog_ndk.z)
 
     # Pairs with the _LIBCPP_ENABLE_EXPERIMENTAL definition above: on
     # libc++ 15 the <format> RUNTIME pieces (std::format_error's destructor,
