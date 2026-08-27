@@ -267,7 +267,7 @@ namespace MobileGL {
                     r.log += "Error: [glslang] Cannot compile " + ConvertGLEnumToString(shaderType) + ":\n" +
                              std::string(tshader->getInfoLog());
                     r.errc = -2;
-                    return std::unexpected(r);
+                    return Unexpected(r);
                 }
 
                 return res;
@@ -281,7 +281,7 @@ namespace MobileGL {
                     ResultInfo r;
                     r.log += "Error: [Preprocess] Unsupported shader type: " + ConvertGLEnumToString(shaderType);
                     r.errc = -1;
-                    return std::unexpected(r);
+                    return Unexpected(r);
                 }
 
                 const String source(attrib.sourceStr);
@@ -470,7 +470,7 @@ namespace MobileGL {
                     ResultInfo r;
                     r.log = "Error: [glslang] Cannot link the program:\n" + std::string(program->getInfoLog());
                     r.errc = -3;
-                    return std::unexpected(r);
+                    return Unexpected(r);
                 }
 
                 for (const auto& [name, loc] : attrib.explicitVertexInLocations) {
@@ -496,7 +496,7 @@ namespace MobileGL {
                     ResultInfo r;
                     r.log = "Error: [glslang] Cannot mapIO:\n" + std::string(program->getInfoLog());
                     r.errc = -4;
-                    return std::unexpected(r);
+                    return Unexpected(r);
                 }
 
                 return program;
@@ -1622,7 +1622,7 @@ namespace MobileGL {
                     r.log += "Failed to compile the shader to GLSL: \n";
                     r.log += session.GetLastErrorString();
                     r.errc = -5;
-                    return std::unexpected(r);
+                    return Unexpected(r);
                 }
 
                 std::string glsl = result;

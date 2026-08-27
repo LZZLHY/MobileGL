@@ -37,7 +37,14 @@
 #include <cstdarg>
 #include <cstring>
 #include <numeric>
+// std::expected is C++23 library machinery that some toolchains at C++23
+// language level still lack entirely - libc++ 15 (e.g. the OpenHarmony SDK)
+// has no <expected> header at all, so even the include must be conditional.
+// MG_Util/ShaderTranspiler/Types.h aliases the vendored tl::expected instead
+// when __cpp_lib_expected is absent.
+#if __has_include(<expected>)
 #include <expected>
+#endif
 #include <iostream>
 // Not transitively provided by <iostream> on every standard library (libc++ 15
 // does not pull it in), and MobileGL uses std::*stringstream directly in many TUs.

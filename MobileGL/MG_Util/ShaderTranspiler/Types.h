@@ -10,6 +10,14 @@
 #include <Includes.h>
 #include <MG_Util/ShaderTranspiler/CompileEnv.h>
 
+#if !(defined(__cpp_lib_expected) && __cpp_lib_expected >= 202202L)
+// Toolchains at C++23 language level without std::expected (libc++ 15, e.g.
+// the OpenHarmony SDK, ships no <expected> header at all). tl::expected is
+// API-compatible for everything this module uses; Result / Unexpected below
+// alias whichever implementation is available.
+#include <tl/expected.hpp>
+#endif
+
 namespace MobileGL {
     namespace MG_Util {
         namespace ShaderTranspiler {
@@ -111,8 +119,15 @@ namespace MobileGL {
                 String log;
             };
 
+#if defined(__cpp_lib_expected) && __cpp_lib_expected >= 202202L
             template <typename T>
             using Result = std::expected<T, ResultInfo>;
+            using Unexpected = std::unexpected<ResultInfo>;
+#else
+            template <typename T>
+            using Result = tl::expected<T, ResultInfo>;
+            using Unexpected = tl::unexpected<ResultInfo>;
+#endif
 
             struct InterfaceVariable {
                 String name;
