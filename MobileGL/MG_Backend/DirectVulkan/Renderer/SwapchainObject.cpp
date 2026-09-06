@@ -7,6 +7,7 @@
 // End of Source File Header
 
 #include "SwapchainObject.h"
+#include "SwapchainGeometry.h"
 
 #include "MG_Impl/GLImpl/Framebuffer/GL_Framebuffer.h"
 #include "MG_State/GLState/TextureState/TextureObject2D.h"
@@ -186,20 +187,21 @@ namespace MobileGL::MG_Backend::DirectVulkan {
         createInfo.minImageCount = targetImageCount;
         createInfo.imageFormat = pickedSurfaceFormat.format;
         createInfo.imageColorSpace = pickedSurfaceFormat.colorSpace;
-        createInfo.imageExtent = swapchainCaps.currentExtent;
-        if (createInfo.imageExtent.width == UINT32_MAX || createInfo.imageExtent.height == UINT32_MAX) {
-            createInfo.imageExtent.width = std::clamp(desiredExtent.width,
-                                                      swapchainCaps.minImageExtent.width,
-                                                      swapchainCaps.maxImageExtent.width);
-            createInfo.imageExtent.height = std::clamp(desiredExtent.height,
-                                                       swapchainCaps.minImageExtent.height,
-                                                       swapchainCaps.maxImageExtent.height);
-        }
-        const VkExtent2D defaultFramebufferExtent = createInfo.imageExtent;
-        if (swapchainCaps.currentTransform == VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR ||
-            swapchainCaps.currentTransform == VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR) {
-            std::swap(createInfo.imageExtent.width, createInfo.imageExtent.height);
-        }
+#if defined(VK_USE_PLATFORM_OHOS)
+        // OHOS exposes buffer geometry through currentExtent. Pre-rotating the
+        // allocation feeds the swapped size back into that query and causes an
+        // endless portrait/landscape recreation loop. Let WSI rotate when supported.
+        constexpr bool preferIdentity = true;
+#else
+        constexpr bool preferIdentity = false;
+#endif
+        const auto geometry = ChooseSwapchainGeometry(swapchainCaps, desiredExtent, preferIdentity);
+        createInfo.imageExtent = geometry.imageExtent;
+        const VkExtent2D defaultFramebufferExtent = geometry.surfaceExtent;
+        MGLOG_I("WSI geometry: surface=%ux%u image=%ux%u supported=0x%x current=0x%x pre=0x%x",
+                geometry.surfaceExtent.width, geometry.surfaceExtent.height,
+                geometry.imageExtent.width, geometry.imageExtent.height,
+                swapchainCaps.supportedTransforms, swapchainCaps.currentTransform, geometry.preTransform);
 
         createInfo.imageArrayLayers = 1;
         const VkImageUsageFlags requiredImageUsage =
@@ -226,7 +228,7 @@ namespace MobileGL::MG_Backend::DirectVulkan {
             createInfo.queueFamilyIndexCount = 0;
             createInfo.pQueueFamilyIndices = nullptr;
         }
-        createInfo.preTransform = swapchainCaps.currentTransform;
+        createInfo.preTransform = geometry.preTransform;
         MGLOG_I("Set swapchain preTransform = %s", string_VkSurfaceTransformFlagBitsKHR(createInfo.preTransform));
         const VkCompositeAlphaFlagBitsKHR compositeAlphaCandidates[] = {
             VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
@@ -253,6 +255,7 @@ namespace MobileGL::MG_Backend::DirectVulkan {
         // and makes the comparison alternate forever.
         m_surfaceExtent = defaultFramebufferExtent;
         m_preTransform = createInfo.preTransform;
+        m_surfaceTransform = swapchainCaps.currentTransform;
 
         VK_VERIFY(vkCreateSwapchainKHR(device, &createInfo, nullptr, &m_swapchain));
 

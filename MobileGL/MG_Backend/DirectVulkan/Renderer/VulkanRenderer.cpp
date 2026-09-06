@@ -7,6 +7,7 @@
 // End of Source File Header
 
 #include "VulkanRenderer.h"
+#include "SwapchainGeometry.h"
 #if defined(VK_USE_PLATFORM_OHOS)
 #include <native_image/native_image.h>
 #include <native_window/external_window.h>
@@ -13997,14 +13998,11 @@ void main() {
         // the swapchain's own (quarter-turn swapped) extent here would report a difference on
         // every rotated frame and rebuild forever.
         const VkExtent2D builtFrom = m_swapchainObject.GetSurfaceExtent();
-        const Bool extentChanged = surfaceCaps.currentExtent.width != builtFrom.width ||
-                                   surfaceCaps.currentExtent.height != builtFrom.height;
-        const Bool transformChanged = surfaceCaps.currentTransform != m_swapchainObject.GetPreTransform();
-        if (!extentChanged && !transformChanged) {
+        if (!SwapchainSurfaceChanged(surfaceCaps, builtFrom, m_swapchainObject.GetSurfaceTransform())) {
             return false;
         }
         MGLOG_D("Swapchain out of date: surface %ux%u transform %u -> %ux%u transform %u",
-                builtFrom.width, builtFrom.height, static_cast<Uint32>(m_swapchainObject.GetPreTransform()),
+                builtFrom.width, builtFrom.height, static_cast<Uint32>(m_swapchainObject.GetSurfaceTransform()),
                 surfaceCaps.currentExtent.width, surfaceCaps.currentExtent.height,
                 static_cast<Uint32>(surfaceCaps.currentTransform));
         return true;

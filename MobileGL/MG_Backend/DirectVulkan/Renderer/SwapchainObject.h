@@ -39,6 +39,7 @@ namespace MobileGL::MG_Backend::DirectVulkan {
         // created from - the value to compare a freshly queried currentExtent against.
         VkExtent2D GetSurfaceExtent() const { return m_surfaceExtent; }
         VkSurfaceTransformFlagBitsKHR GetPreTransform() const { return m_preTransform; }
+        VkSurfaceTransformFlagBitsKHR GetSurfaceTransform() const { return m_surfaceTransform; }
         const Vector<VkImage>& GetImages() const { return m_images; }
         const Vector<VkImageView>& GetImageViews() const { return m_imageViews; }
         VkFormat GetDepthStencilFormat() const { return m_depthStencilFormat; }
@@ -83,6 +84,7 @@ namespace MobileGL::MG_Backend::DirectVulkan {
         VkExtent2D m_extent{};
         VkExtent2D m_surfaceExtent{};
         VkSurfaceTransformFlagBitsKHR m_preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+        VkSurfaceTransformFlagBitsKHR m_surfaceTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
         Vector<VkImage> m_images;
         Vector<VkImageView> m_imageViews;
         Vector<VkImageLayout> m_imageLayouts;

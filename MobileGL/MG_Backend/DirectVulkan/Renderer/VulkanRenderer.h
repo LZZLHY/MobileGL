@@ -505,16 +505,15 @@ namespace MobileGL::MG_Backend::DirectVulkan {
         void* m_platformCloseDisplay = nullptr;
         // Whether the loader exposes VK_EXT_headless_surface, detected once in
         // CreateInstance() from the enumerated instance extensions. On desktop an
-        // offscreen surface REQUIRES it: false is a clean, loud bring-up failure, never
-        // a substituted window. (Android is the one exception and has its own path -
-        // no Mali/Adreno driver seen so far exposes the extension, so a windowless
-        // context is given an AImageReader ANativeWindow that is never displayed.)
+        // offscreen surface requires it. Android and OHOS can instead use private,
+        // non-displaying consumer windows, without depending on a desktop display server.
         Bool m_headlessSurfaceSupported = true;
         // Android has the same shortfall: no Mali/Adreno driver seen so far exposes
         // VK_EXT_headless_surface, so a windowless (EGL pbuffer) context gets an
         // AImageReader's ANativeWindow to hand the WSI instead. Nothing is ever
         // displayed - the reader's images are simply never acquired. Owned here, so
-        // Shutdown() deletes it.
+        // Shutdown() deletes it. On OHOS this field owns the OH_NativeImage consumer;
+        // its NativeWindow is borrowed and must not be independently destroyed.
         void* m_fallbackImageReader = nullptr;
         VulkanRendererConfig m_config;
         Bool m_swapchainResizeRequested = false;
