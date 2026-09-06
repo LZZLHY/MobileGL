@@ -665,6 +665,9 @@ if (MOBILEGL_OHOS)
     # (Minecraft loads lwjgl-shaderc / lwjgl-spvc natives embedding glslang
     # and SPIRV-Cross), and default visibility lets the copies interpose.
     target_link_options(${CMAKE_PROJECT_NAME} PRIVATE "LINKER:--exclude-libs,ALL")
+    # The process also contains system GLES and MobileGlues. Keep this EGL
+    # provider's GL function table bound to this DSO, even under RTLD_GLOBAL.
+    target_link_options(${CMAKE_PROJECT_NAME} PRIVATE "LINKER:-Bsymbolic-functions")
 endif()
 
 if (APPLE AND NOT MOBILEGL_IOS)
