@@ -646,7 +646,7 @@ if (MOBILEGL_OHOS)
     # 3rdparty/Vulkan-Headers through the Vulkan::UtilityHeaders link
     # interface, exactly like every other platform. hilog_ndk.z is the system
     # log sink (Log.cpp), the OHOS counterpart of ANDROID's liblog.
-    target_link_libraries(${CMAKE_PROJECT_NAME} PUBLIC vulkan hilog_ndk.z)
+    target_link_libraries(${CMAKE_PROJECT_NAME} PUBLIC vulkan hilog_ndk.z native_image native_window)
 
     # Pairs with the _LIBCPP_ENABLE_EXPERIMENTAL definition above: on
     # libc++ 15 the <format> RUNTIME pieces (std::format_error's destructor,

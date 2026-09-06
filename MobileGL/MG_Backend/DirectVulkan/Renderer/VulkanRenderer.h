@@ -129,6 +129,10 @@ namespace MobileGL::MG_Backend::DirectVulkan {
 
         void Initialize();
         void Shutdown();
+#if defined(VK_USE_PLATFORM_OHOS)
+        // Change only WSI resources; EGL surface switching must not destroy GL resources.
+        Bool RetargetOhosSurface(NativeWindowType window, Uint32 width, Uint32 height);
+#endif
 
         // IBufferCopyCommandProvider: recording command buffer, outside any
         // render pass, for immediate staged buffer copies.

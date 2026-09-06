@@ -340,6 +340,11 @@ namespace MobileGL::MG_Backend::DirectVulkan {
         }
 
         auto nativeWindow = reinterpret_cast<NativeWindowType>(m_windowHandle.Handle);
+#if defined(VK_USE_PLATFORM_OHOS)
+        if (pVulkanRenderer) {
+            return pVulkanRenderer->RetargetOhosSurface(nativeWindow, m_windowHandle.Width, m_windowHandle.Height);
+        }
+#endif
 
         // Any renderer instance this assignment replaces is destroyed here;
         // fence/timer-query handles stamped with the old generation go stale.
@@ -351,6 +356,12 @@ namespace MobileGL::MG_Backend::DirectVulkan {
     }
 
     Bool BackendObject_DirectVulkan::InitPbufferSurface(EGLint width, EGLint height) {
+#if defined(VK_USE_PLATFORM_OHOS)
+        if (pVulkanRenderer) {
+            return pVulkanRenderer->RetargetOhosSurface(NativeWindowType{}, std::max<EGLint>(width, 1),
+                                                      std::max<EGLint>(height, 1));
+        }
+#endif
         VulkanRendererConfig config;
         config.SurfaceWidth = static_cast<Uint32>(std::max<EGLint>(width, 1));
         config.SurfaceHeight = static_cast<Uint32>(std::max<EGLint>(height, 1));
@@ -475,6 +486,14 @@ namespace MobileGL::MG_Backend::DirectVulkan {
 
     void BackendObject_DirectVulkan::OnEGLSurfaceReleased(EGLSurface surface) {
         (void)surface;
+#if defined(VK_USE_PLATFORM_OHOS)
+        if (pVulkanRenderer && !m_eglSurfaces.empty()) {
+            // Other EGL surfaces still belong to this context. Release the host
+            // WSI before its lease ends, retaining the device and GL resources.
+            pVulkanRenderer->RetargetOhosSurface(NativeWindowType{}, 1, 1);
+            return;
+        }
+#endif
         // Outstanding fence/timer-query handles now refer to a dead renderer;
         // treat them as signaled/available with zero results from here on.
         BumpRendererGeneration();

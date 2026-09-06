@@ -7,6 +7,10 @@
 // End of Source File Header
 
 #include "VulkanRenderer.h"
+#if defined(VK_USE_PLATFORM_OHOS)
+#include <native_image/native_image.h>
+#include <native_window/external_window.h>
+#endif
 
 #include "MG_Backend/DirectVulkan/SubgroupSupportPolicy.h"
 #include "MG_Backend/DirectGLES/Utils.h"
@@ -3177,6 +3181,69 @@ void main() {
         MGLOG_D("VulkanRenderer initialized");
     }
 
+#if defined(VK_USE_PLATFORM_OHOS)
+    Bool VulkanRenderer::RetargetOhosSurface(NativeWindowType window, Uint32 width, Uint32 height) {
+        if (window && window == m_window) {
+            RequestSwapchainResize(width, height);
+            return true;
+        }
+        // Submit before rebuilding WSI: dropping a recorded upload here would
+        // preserve its GL metadata while losing the actual GPU contents.
+        FlushPendingCommands();
+        VK_VERIFY(vkDeviceWaitIdle(m_device), "OHOS surface switch, drain device");
+        OnSubmitsCompletedUpTo(m_submitCounter);
+
+        const auto oldWindow = m_window;
+        const auto oldSurface = m_surface;
+        const auto oldWidth = m_config.SurfaceWidth;
+        const auto oldHeight = m_config.SurfaceHeight;
+        m_window = window;
+        m_surface = VK_NULL_HANDLE;
+        m_config.SurfaceWidth = std::max<Uint32>(width, 1);
+        m_config.SurfaceHeight = std::max<Uint32>(height, 1);
+        try {
+            CreateSurface();
+            VkBool32 supported = VK_FALSE;
+            VK_VERIFY(vkGetPhysicalDeviceSurfaceSupportKHR(m_physicalDevice.handle,
+                static_cast<Uint32>(m_physicalDevice.queueFamilies.presentFamily), m_surface, &supported));
+            if (!supported) throw RuntimeError("OHOS replacement surface cannot use the existing present queue");
+        } catch (...) {
+            if (m_surface) vkDestroySurfaceKHR(m_instance, m_surface, nullptr);
+            m_surface = oldSurface;
+            m_window = oldWindow;
+            m_config.SurfaceWidth = oldWidth;
+            m_config.SurfaceHeight = oldHeight;
+            throw;
+        }
+
+        ShutdownSwapchain();
+        vkDestroySurfaceKHR(m_instance, oldSurface, nullptr);
+        // The old acquire may have signaled a semaphore without a frame submit.
+        // Device-idle proves no pending use; create a clean pair before re-acquire.
+        auto& frame = m_frameContext.GetCurrent();
+        vkDestroySemaphore(m_device, frame.imageAvailableSemaphore, nullptr);
+        frame.imageAvailableSemaphore = VK_NULL_HANDLE;
+        vkDestroyFence(m_device, frame.imageInFlightFence, nullptr);
+        frame.imageInFlightFence = VK_NULL_HANDLE;
+        VkSemaphoreCreateInfo semaphoreInfo{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+        VK_VERIFY(vkCreateSemaphore(m_device, &semaphoreInfo, nullptr, &frame.imageAvailableSemaphore));
+        VkFenceCreateInfo fenceInfo{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+        fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+        VK_VERIFY(vkCreateFence(m_device, &fenceInfo, nullptr, &frame.imageInFlightFence));
+        if (!RecreateSwapchain()) throw RuntimeError("OHOS replacement swapchain has zero extent");
+        const VkResult acquired = m_frameContext.WaitAndAcquireNextImage(
+            m_device, m_swapchainObject.GetHandle(), m_imageIndexAcquired);
+        if (acquired != VK_SUCCESS && acquired != VK_SUBOPTIMAL_KHR) {
+            VK_VERIFY(acquired, "OHOS replacement swapchain acquire");
+        }
+        m_presentSuspended = false;
+        m_swapchainResizeRequested = false;
+        m_uniformManager->BeginFrame(m_frameContext.GetCurrentFrameIndex());
+        MGLOG_I("OHOS surface retarget: device preserved, extent=%ux%u", width, height);
+        return true;
+    }
+#endif
+
     void VulkanRenderer::Shutdown() {
         if (m_instance == VK_NULL_HANDLE && m_device == VK_NULL_HANDLE && m_surface == VK_NULL_HANDLE) {
             return;
@@ -3303,6 +3370,15 @@ void main() {
         if (m_platformLibrary != nullptr) {
             dlclose(m_platformLibrary);
             m_platformLibrary = nullptr;
+        }
+#endif
+
+#if defined(VK_USE_PLATFORM_OHOS)
+        if (m_fallbackImageReader) {
+            auto* image = static_cast<OH_NativeImage*>(m_fallbackImageReader);
+            OH_NativeImage_Destroy(&image);
+            m_fallbackImageReader = nullptr;
+            m_window = 0;
         }
 #endif
 
@@ -12175,6 +12251,23 @@ void main() {
             result = VK_SUCCESS;
         }
         VK_VERIFY(result, "Present, vkQueuePresentKHR");
+#if defined(VK_USE_PLATFORM_OHOS)
+        if (m_fallbackImageReader && m_window == reinterpret_cast<NativeWindowType>(
+                OH_NativeImage_AcquireNativeWindow(static_cast<OH_NativeImage*>(m_fallbackImageReader)))) {
+            // Consume without CPU readback or a GLES texture. Passing the acquire
+            // fence back as the release fence preserves GPU completion ordering.
+            VK_VERIFY(vkQueueWaitIdle(m_presentQueue), "OHOS pbuffer present drain");
+            OHNativeWindowBuffer* buffer = nullptr;
+            int fenceFd = -1;
+            auto* image = static_cast<OH_NativeImage*>(m_fallbackImageReader);
+            while (OH_NativeImage_AcquireNativeWindowBuffer(image, &buffer, &fenceFd) == 0) {
+                OH_NativeWindow_NativeObjectReference(buffer);
+                const auto released = OH_NativeImage_ReleaseNativeWindowBuffer(image, buffer, fenceFd);
+                OH_NativeWindow_NativeObjectUnreference(buffer);
+                if (released != 0) throw RuntimeError("OHOS pbuffer buffer release failed");
+            }
+        }
+#endif
         // EGL swap semantics: the presented color buffer's content is undefined the
         // next time this image is acquired (EGL_BUFFER_DESTROYED, the default swap
         // behaviour), and EVERY ancillary depth/stencil buffer's content is
@@ -12329,20 +12422,10 @@ void main() {
                 exts.push_back(VK_KHR_ANDROID_SURFACE_EXTENSION_NAME);
             }
 #elif defined VK_USE_PLATFORM_OHOS
-            // Same policy as the Xlib branch below: an offscreen surface either
-            // comes from VK_EXT_headless_surface or is an honest bring-up failure.
-            // No window-object fallback is built here - the on-screen path always
-            // receives its OHNativeWindow from the host through the EGL front end,
-            // and nothing on the Minecraft path ever asks for a pbuffer context.
             m_headlessSurfaceSupported = IsExtensionSupported(m_extensions, VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME);
-            if (!m_headlessSurfaceSupported) {
-                MGLOG_F("%s is not available from this Vulkan loader, so an offscreen (pbuffer) DirectVulkan "
-                        "surface cannot be created on OpenHarmony. The on-screen path is unaffected: it gets "
-                        "its OHNativeWindow through eglCreateWindowSurface.",
-                        VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME);
-                throw RuntimeError("VK_EXT_headless_surface is unavailable for an offscreen DirectVulkan surface");
-            }
-            exts.push_back(VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME);
+            // Enable OHOS WSI even for pbuffer-first: this device can later target a window.
+            exts.push_back(VK_OHOS_SURFACE_EXTENSION_NAME);
+            if (m_headlessSurfaceSupported) exts.push_back(VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME);
 #elif defined VK_USE_PLATFORM_XLIB_KHR
             // An offscreen surface has ZERO window-system dependence, by design and on
             // every machine - including ones that do have a display. There used to be a
@@ -13488,7 +13571,21 @@ void main() {
 
     void VulkanRenderer::CreateSurface() {
         if (!m_window) {
-#if defined VK_USE_PLATFORM_METAL_EXT
+#if defined VK_USE_PLATFORM_OHOS
+            auto* image = static_cast<OH_NativeImage*>(m_fallbackImageReader);
+            if (!image) {
+                image = OH_ConsumerSurface_Create();
+                if (!image) throw RuntimeError("OH_ConsumerSurface_Create failed for pbuffer");
+                m_fallbackImageReader = image;
+            }
+            if (OH_ConsumerSurface_SetDefaultSize(image, std::max<Uint32>(m_config.SurfaceWidth, 1),
+                    std::max<Uint32>(m_config.SurfaceHeight, 1)) != 0) {
+                throw RuntimeError("OHOS pbuffer consumer size rejected");
+            }
+            m_window = reinterpret_cast<NativeWindowType>(OH_NativeImage_AcquireNativeWindow(image));
+            if (!m_window) throw RuntimeError("OHOS pbuffer NativeWindow unavailable");
+            MGLOG_I("OHOS pbuffer consumer ready: %ux%u", m_config.SurfaceWidth, m_config.SurfaceHeight);
+#elif defined VK_USE_PLATFORM_METAL_EXT
             m_window = reinterpret_cast<NativeWindowType>(
                 CreateInternalMetalLayer(m_config.SurfaceWidth, m_config.SurfaceHeight, &m_platformDisplay));
             m_platformLibrary = reinterpret_cast<void*>(m_window);
