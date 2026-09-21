@@ -18,6 +18,9 @@
 namespace MobileGL::MG_Impl::EGLImpl {
     namespace {
         using EGLStateContext = MG_State::EGLState::EGLContext;
+        // 序列随实际调用线程变化；宿主在同线程swap前后比较，辅助窗口的其他线程不会
+        // 借一帧进来。provider全量退休也不倒退，避免同进程句柄复用制造假增量。
+        thread_local std::uint64_t presentedSequence = 0;
 
         EGLStateContext* GetState() {
             if (!MG_State::pEGLContext) {
@@ -180,13 +183,30 @@ namespace MobileGL::MG_Impl::EGLImpl {
             MGLOG_E_ONCE("activeBackendObject not initialized!");
             return EGL_FALSE;
         }
-        if (!backendObject->SwapEGLBuffers(dpy, draw)) {
-            MGLOG_E_ONCE("eglSwapBuffers failed on thread=%s dpy=%p draw=%p", CurrentThreadIdString().c_str(), dpy, draw);
-            state->SetError(EGL_BAD_SURFACE);
+        MG_Backend::PresentationResult result;
+        try {
+            result = backendObject->SwapEGLBuffers(dpy, draw);
+        } catch (const std::exception& error) {
+            // C++异常不得越过公开EGL C ABI；未知的部分提交状态按终局处理，资源仍由
+            // 当前provider保留，宿主只能结束本局，不能把它当普通surface重建继续提交。
+            MGLOG_E_ONCE("eglSwapBuffers backend exception: %s", error.what());
+            state->SetError(EGL_CONTEXT_LOST);
             return EGL_FALSE;
         }
+        if (result.presented) {
+            if (presentedSequence == UINT64_MAX) { state->SetError(EGL_CONTEXT_LOST); return EGL_FALSE; }
+            ++presentedSequence;
+        }
+        if (!result) {
+            MGLOG_E_ONCE("eglSwapBuffers failed on thread=%s dpy=%p draw=%p native=%d", CurrentThreadIdString().c_str(), dpy, draw, result.nativeError);
+            state->SetError(result.status == MG_Backend::PresentationStatus::SurfaceLost ? EGL_BAD_SURFACE : EGL_CONTEXT_LOST);
+            return EGL_FALSE;
+        }
+        // Deferred保持EGL调用成功的兼容语义，但不增加真实present序列。
         return EGL_TRUE;
     }
+
+    std::uint64_t PresentedSequence() { return presentedSequence; }
 
     EGLBoolean ChooseConfig(EGLDisplay dpy, const EGLint* attrib_list, EGLConfig* configs, EGLint config_size,
                             EGLint* num_config) {

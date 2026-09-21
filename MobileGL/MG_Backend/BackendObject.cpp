@@ -366,35 +366,35 @@ namespace MobileGL::MG_Backend {
         m_eglCurrentThreads.clear();
     }
 
-    Bool BackendObject::SwapEGLBuffers(EGLDisplay dpy, EGLSurface draw) {
+    PresentationResult BackendObject::SwapEGLBuffers(EGLDisplay dpy, EGLSurface draw) {
         const std::lock_guard<std::recursive_mutex> lock(m_eglStateMutex);
         if (!m_eglDisplayInitialized || m_eglDisplay != dpy) {
             MGLOG_E("SwapEGLBuffers failed: EGL display mismatch or not initialized");
-            return false;
+            return {PresentationStatus::SurfaceLost, false, 0};
         }
         const auto currentIt = m_eglCurrentThreads.find(CurrentThreadKey());
         if (currentIt == m_eglCurrentThreads.end()) {
             MGLOG_E("SwapEGLBuffers failed: no current context attached");
-            return false;
+            return {PresentationStatus::SurfaceLost, false, 0};
         }
         if (currentIt->second.Display != dpy || currentIt->second.DrawSurface != draw ||
             currentIt->second.Context == EGL_NO_CONTEXT) {
             MGLOG_E("SwapEGLBuffers failed: draw surface is not current on this thread");
-            return false;
+            return {PresentationStatus::SurfaceLost, false, 0};
         }
         if (!m_eglSurfaceInitialized || draw == EGL_NO_SURFACE || draw != m_eglSurface) {
             MGLOG_E("SwapEGLBuffers failed: invalid draw surface");
-            return false;
+            return {PresentationStatus::SurfaceLost, false, 0};
         }
 
         const auto& backendFunctions = GetBackendFunctions();
         if (!backendFunctions.Present) {
             MGLOG_E("SwapEGLBuffers failed: backend Present function is null");
-            return false;
+            return {PresentationStatus::SurfaceLost, false, 0};
         }
 
-        backendFunctions.Present();
-        return true;
+        // 后端结果原样上交，零面积暂缓与完成呈现不可合并。
+        return backendFunctions.Present();
     }
 
     void BackendObject::SetEGLSwapInterval(Int interval) {

@@ -9951,7 +9951,7 @@ namespace MobileGL::MG_Backend::DirectGLES {
         return true;
     }
 
-    void Present() {
+    PresentationResult Present() {
         // Insert one fence per frame BEFORE the swap (eglSwapBuffers' implicit flush
         // makes it reachable), then non-blocking-poll prior frames' fences AFTER to
         // advance the completed-frame watermark that gates buffer-pool recycling.
@@ -9965,7 +9965,12 @@ namespace MobileGL::MG_Backend::DirectGLES {
             slot = {g_GLESFuncs.glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0), g_syncContextGeneration, serial};
         }
 
-        g_EGLFuncs.eglSwapBuffers(g_Display, g_Surface);
+        // GLES驱动失败须在操作边界取回原始错误；失败不能继续推进呈现证据。
+        if (!g_EGLFuncs.eglSwapBuffers(g_Display, g_Surface)) {
+            const EGLint error = g_EGLFuncs.eglGetError();
+            return {error == EGL_CONTEXT_LOST ? PresentationStatus::DeviceLost : PresentationStatus::SurfaceLost,
+                    false, error};
+        }
 
         if (canFence && g_GLESFuncs.glGetSynciv) {
             // Fences signal in submission order within one context, so the highest
@@ -9990,6 +9995,7 @@ namespace MobileGL::MG_Backend::DirectGLES {
         BufferImpl::UboRingOnPresent();
         BufferImpl::UnpackRingOnPresent();
         BufferImpl::TrimBufferPool();
+        return {PresentationStatus::Presented, true, 0};
     }
 
     void DestroyEGLContext() {

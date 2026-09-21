@@ -33,7 +33,7 @@ namespace MobileGL::MG_Backend::DirectVulkan {
         Bool ResizeEGLWindowSurface(EGLSurface surface, Uint32 width, Uint32 height) override;
         Bool CreateEGLPbufferSurface(EGLSurface surface, EGLint width, EGLint height) override;
         Bool MakeEGLCurrent(EGLDisplay dpy, EGLSurface draw, EGLSurface read, EGLContext ctx) override;
-        Bool SwapEGLBuffers(EGLDisplay dpy, EGLSurface draw) override;
+        PresentationResult SwapEGLBuffers(EGLDisplay dpy, EGLSurface draw) override;
         void ReleaseEGLSurface(EGLSurface surface) override;
         void ReleaseEGLResources() override;
 

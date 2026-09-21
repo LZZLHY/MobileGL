@@ -1408,8 +1408,8 @@ namespace MobileGL::MG_Backend::DirectVulkan {
         return 0;
     }
 
-    void Present() {
+    PresentationResult Present() {
         MOBILEGL_ASSERT(pVulkanRenderer, "DirectVulkan::Present called with null VulkanRenderer");
-        pVulkanRenderer->Present();
+        return pVulkanRenderer->Present();
     }
 } // namespace MobileGL::MG_Backend::DirectVulkan

@@ -953,7 +953,7 @@ namespace MobileGL::MG_Backend::DirectGLES {
         return true;
     }
 
-    Bool BackendObject_DirectGLES::SwapEGLBuffers(EGLDisplay dpy, EGLSurface draw) {
+    PresentationResult BackendObject_DirectGLES::SwapEGLBuffers(EGLDisplay dpy, EGLSurface draw) {
         return BackendObject::SwapEGLBuffers(dpy, draw);
     }
 

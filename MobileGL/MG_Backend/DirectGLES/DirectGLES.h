@@ -7,6 +7,7 @@
 // End of Source File Header
 
 #pragma once
+#include <MG_Backend/PresentationResult.h>
 #include <Includes.h>
 #include <MG_Backend/BackendObject.h>
 #include <MG_State/GLState/FramebufferState/FramebufferObject.h>
@@ -165,7 +166,7 @@ namespace MobileGL::MG_Backend::DirectGLES {
     Bool GetQueryResult64(BackendQueryHandle query, Bool wait, Uint64* outNanoseconds);
     void DeleteBackendQuery(BackendQueryHandle query);
     Int64 GetGpuTimestampNs();
-    void Present();
+    PresentationResult Present();
     // Frame-completion watermarks for the buffer-storage pool: CurrentFrameSerial()
     // is bumped once per Present(); CompletedFrameSerial() is the newest frame whose
     // GPU work has provably finished (advanced by polling a one-fence-per-frame ring).

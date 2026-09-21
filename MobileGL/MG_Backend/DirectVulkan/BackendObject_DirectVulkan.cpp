@@ -458,11 +458,11 @@ namespace MobileGL::MG_Backend::DirectVulkan {
         return BackendObject::MakeEGLCurrent(dpy, draw, read, ctx);
     }
 
-    Bool BackendObject_DirectVulkan::SwapEGLBuffers(EGLDisplay dpy, EGLSurface draw) {
+    PresentationResult BackendObject_DirectVulkan::SwapEGLBuffers(EGLDisplay dpy, EGLSurface draw) {
         const std::lock_guard<std::recursive_mutex> lock(m_eglStateMutex);
         if (!pVulkanRenderer) {
             MGLOG_E("DirectVulkan renderer is not initialized");
-            return false;
+            return {PresentationStatus::DeviceLost, false, 0};
         }
         return BackendObject::SwapEGLBuffers(dpy, draw);
     }

@@ -12123,7 +12123,17 @@ void main() {
         return m_timerQueryManager ? m_timerQueryManager->TimestampNs(record) : 0;
     }
 
-    void VulkanRenderer::Present() {
+    PresentationResult VulkanRenderer::Present() {
+        // 只在驱动确实接受本帧present后置位；之后下一帧准备失败仍保留这个事实。
+        bool didPresent = false;
+        const auto failure = [&](VkResult result) -> PresentationResult {
+            const auto status = result == VK_ERROR_SURFACE_LOST_KHR ? PresentationStatus::SurfaceLost :
+                result == VK_ERROR_DEVICE_LOST ? PresentationStatus::DeviceLost : PresentationStatus::Failed;
+            return {status, didPresent, static_cast<std::int32_t>(result)};
+        };
+        const auto completed = [&]() -> PresentationResult {
+            return {didPresent ? PresentationStatus::Presented : PresentationStatus::Deferred, didPresent, 0};
+        };
         if (m_swapchainObject.GetHandle() == VK_NULL_HANDLE || m_presentSuspended) {
             // No usable swapchain: the window was zero-area at initialization, or
             // presentation was suspended when the window minimized. Try to bring a
@@ -12150,7 +12160,7 @@ void main() {
                 // suspension.
                 TryDrainFrameTransients();
                 MGLOG_D("Present skipped: no usable swapchain (zero-area window)");
-                return;
+                return completed();
             }
             m_presentSuspended = false;
             const VkResult acquireResult =
@@ -12160,7 +12170,8 @@ void main() {
                 // only if the surface genuinely no longer matches (see step 4 of Present).
                 m_swapchainResizeRequested = m_swapchainResizeRequested || SwapchainIsOutOfDate();
             } else {
-                VK_VERIFY(acquireResult, "Present, deferred first WaitAndAcquireNextImage");
+                if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR) { m_presentSuspended = true; return completed(); }
+                if (acquireResult != VK_SUCCESS) return failure(acquireResult);
             }
         }
         MOBILEGL_ASSERT(m_imageIndexAcquired < m_swapchainObject.GetImageCount(),
@@ -12219,7 +12230,8 @@ void main() {
             m_textureManager->FlushPendingUploads();
         }
         auto submitPacket = m_frameContext.GetSubmitInfo(shouldSubmitCommandBuffer, m_imageIndexAcquired);
-        VK_VERIFY(vkQueueSubmit(m_graphicsQueue, 1, &submitPacket.submitInfo, frame.imageInFlightFence));
+        const VkResult submitted = vkQueueSubmit(m_graphicsQueue, 1, &submitPacket.submitInfo, frame.imageInFlightFence);
+        if (submitted != VK_SUCCESS) return failure(submitted);
         RegisterSubmit(frame.imageInFlightFence, /*pooledFence=*/false);
         frame.lastSubmitIndex = m_submitCounter;
         frame.isCommandRecording = false;
@@ -12230,6 +12242,7 @@ void main() {
         // 2) Present current frame.
         auto presentPacket = m_frameContext.GetPresentInfo(m_swapchainObject.GetHandle(), m_imageIndexAcquired);
         auto result = vkQueuePresentKHR(m_presentQueue, &presentPacket.presentInfo);
+        didPresent = result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR;
         if (result == VK_SUBOPTIMAL_KHR) {
             // Suboptimal is not a reason to rebuild on its own: a driver may report it for a
             // surface whose size and orientation still match what we built from (Android does
@@ -12246,18 +12259,19 @@ void main() {
                 m_presentSuspended = true;
                 m_swapchainResizeRequested = false;
                 MGLOG_D("Present, zero-area window with out-of-date swapchain; suspending presentation");
-                return;
+                return completed();
             }
             m_swapchainResizeRequested = false;
             result = VK_SUCCESS;
         }
-        VK_VERIFY(result, "Present, vkQueuePresentKHR");
+        if (result != VK_SUCCESS) return failure(result);
 #if defined(VK_USE_PLATFORM_OHOS)
         if (m_fallbackImageReader && m_window == reinterpret_cast<NativeWindowType>(
                 OH_NativeImage_AcquireNativeWindow(static_cast<OH_NativeImage*>(m_fallbackImageReader)))) {
             // Consume without CPU readback or a GLES texture. Passing the acquire
             // fence back as the release fence preserves GPU completion ordering.
-            VK_VERIFY(vkQueueWaitIdle(m_presentQueue), "OHOS pbuffer present drain");
+            const VkResult drained = vkQueueWaitIdle(m_presentQueue);
+            if (drained != VK_SUCCESS) return failure(drained);
             OHNativeWindowBuffer* buffer = nullptr;
             int fenceFd = -1;
             auto* image = static_cast<OH_NativeImage*>(m_fallbackImageReader);
@@ -12289,7 +12303,7 @@ void main() {
                 m_presentSuspended = true;
                 m_swapchainResizeRequested = false;
                 MGLOG_D("Present, zero-area window on requested resize; suspending presentation");
-                return;
+                return completed();
             }
             m_swapchainResizeRequested = false;
         }
@@ -12314,13 +12328,13 @@ void main() {
                 m_presentSuspended = true;
                 m_swapchainResizeRequested = false;
                 MGLOG_D("Present, zero-area window on next-frame acquire; suspending presentation");
-                return;
+                return completed();
             }
             m_swapchainResizeRequested = false;
             result =
                 m_frameContext.WaitAndAcquireNextImage(m_device, m_swapchainObject.GetHandle(), m_imageIndexAcquired);
         }
-        VK_VERIFY(result, "Present, vkAcquireNextImageKHR");
+        if (result != VK_SUCCESS) return failure(result);
         // The acquired slot's fence has been waited: its last submission
         // (and, in queue order, everything before it) is complete. The frame
         // serials those submissions carried advance the buffer-manager floor
@@ -12337,6 +12351,7 @@ void main() {
         // descriptor set per draw for the whole frame; it would also be unsafe
         // after a mid-frame FlushPendingCommands, which does not wait.)
         m_uniformManager->BeginFrame(m_frameContext.GetCurrentFrameIndex());
+        return completed();
     }
 
     void VulkanRenderer::CreateInstance() {

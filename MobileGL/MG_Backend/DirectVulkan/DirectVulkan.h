@@ -7,6 +7,7 @@
 // End of Source File Header
 
 #pragma once
+#include <MG_Backend/PresentationResult.h>
 #include <Includes.h>
 #include <MG_Backend/BackendObject.h>
 #include "Renderer/VulkanRenderer.h"
@@ -136,5 +137,5 @@ namespace MobileGL::MG_Backend::DirectVulkan {
     // Always 0: Vulkan cannot synchronously sample the GPU clock (timestamps
     // only exist as vkCmdWriteTimestamp results); the frontend falls back.
     Int64 GetGpuTimestampNs();
-    void Present();
+    PresentationResult Present();
 } // namespace MobileGL::MG_Backend::DirectVulkan

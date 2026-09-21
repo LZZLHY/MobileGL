@@ -9,6 +9,12 @@
 #include <Includes.h>
 #include "../EGLImpl.h"
 
+// 可选宿主证据接口：只跨C ABI传递固定宽度整数。调用方须在同一线程的swap前后取值，
+// 只有序列增加才能记录上屏；接口不会消费eglGetError，也不初始化/切换图形后端。
+MOBILEGL_API std::uint64_t mobileglGetPresentedSequenceV1(void) {
+    return MobileGL::MG_Impl::EGLImpl::PresentedSequence();
+}
+
 MOBILEGL_EGL_API EGLSurface eglCreateWindowSurface(EGLDisplay dpy, EGLConfig config, NativeWindowType window,
                                                    const EGLint* attrib_list) {
     MGLOG_D("eglCreateWindowSurface(dpy=%p, config=%p, window=%p, attrib_list=%p)", dpy, config, window, attrib_list);

@@ -13,6 +13,8 @@ namespace MobileGL::MG_Impl::EGLImpl {
     EGLSurface CreateWindowSurface(EGLDisplay dpy, EGLConfig config, NativeWindowType window,
                                    const EGLint* attrib_list);
     EGLBoolean SwapBuffers(EGLDisplay dpy, EGLSurface draw);
+    // 当前调用线程已经真正呈现的单调序列。只读、不初始化provider、不改变EGL错误状态。
+    std::uint64_t PresentedSequence();
     EGLBoolean ChooseConfig(EGLDisplay dpy, const EGLint* attrib_list, EGLConfig* configs, EGLint config_size,
                             EGLint* num_config);
     EGLContext CreateContext(EGLDisplay dpy, EGLConfig config, EGLContext shareCtx, const EGLint* attrib_list);

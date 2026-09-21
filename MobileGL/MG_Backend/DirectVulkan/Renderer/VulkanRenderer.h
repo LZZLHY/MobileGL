@@ -7,6 +7,7 @@
 // End of Source File Header
 
 #pragma once
+#include <MG_Backend/PresentationResult.h>
 #include "Config.h"
 #include "FrameContext.h"
 #include "PipelineFactory.h"
@@ -272,7 +273,7 @@ namespace MobileGL::MG_Backend::DirectVulkan {
         void MultiDrawArraysIndirect(GLenum mode, const void* indirect, GLsizei drawcount, GLsizei stride);
         void MultiDrawElementsIndirectCount(GLenum mode, GLenum type, const void* indirect, GLintptr drawcount,
                                             GLsizei maxdrawcount, GLsizei stride);
-        void Present();
+        PresentationResult Present();
 
         const PhysicalDevice& GetPhysicalDevice() const;
         VkInstance GetInstance() const;
