@@ -855,15 +855,17 @@ namespace MobileGL::MG_Backend::DirectGLES {
                 // adopts and drops it only after this returns).
                 BindBufferId(TempBufferTarget, resource->id);
                 const void* initial = bufferObject.MappedData();
+                // 此地址成为frontend的权威存储；即使应用本次只写，GetBufferSubData或GPU
+                // 结果读取仍会通过它。因此内部映射必须有读写权限，不能提供只写指针供CPU读。
                 g_GLESFuncs.glBufferStorageEXT(TempBufferTarget, static_cast<GLsizeiptr>(size), initial,
-                                               GL_MAP_WRITE_BIT | kMapPersistentBit | kMapCoherentBit |
+                                               GL_MAP_READ_BIT | GL_MAP_WRITE_BIT | kMapPersistentBit | kMapCoherentBit |
                                                    kDynamicStorageBit);
                 // Set as soon as the store exists, not once the map succeeds: the failure
                 // path below leaves this id holding immutable storage, and whoever touches
                 // it next has to know that glBufferData cannot redefine it.
                 resource->immutableStorage = true;
                 void* ptr = g_GLESFuncs.glMapBufferRange(TempBufferTarget, 0, static_cast<GLsizeiptr>(size),
-                                                         GL_MAP_WRITE_BIT | kMapPersistentBit | kMapCoherentBit);
+                                                         GL_MAP_READ_BIT | GL_MAP_WRITE_BIT | kMapPersistentBit | kMapCoherentBit);
                 if (!ptr) {
                     MGLOG_E_ONCE("Ops_AcquirePersistentMap: glMapBufferRange(persistent) failed for buffer %u",
                             resource->id);

@@ -108,23 +108,18 @@ namespace MobileGL::MG_State::GLState {
         MapAlignedData& Shadow() { return *m_shadow; }
         const MapAlignedData& Shadow() const { return *m_shadow; }
 
-        // Transition to persistent GPU residency: adopt the backend's coherent
-        // mapped base as the source of truth and drop the CPU shadow. The caller
-        // must have already seeded the GPU memory from the shadow (via the backend
-        // AcquirePersistentMap op) before calling this.
+        // 将backend已用shadow初始化的coherent存储设为权威地址，并释放shadow。
+        // 只能在映射地址发布前或没有活动映射时调用；BufferObject负责这项生命周期检查。
+        // 应用的READ/WRITE/FLUSH_EXPLICIT标志不决定物理存储能否采用此模式。
         void AdoptPersistentMap(void* mappedBase) {
             m_gpuMapped = mappedBase;
             m_shadow->clear();
             m_shadow->shrink_to_fit();
         }
 
-        // Give the adoption back: the bytes resolve against the shadow again (which
-        // the caller must (re)size, it was released on adoption). Used when the store
-        // itself is redefined - the mapping describes exactly the store that is going
-        // away, so it may neither be written through nor kept. It is NOT a general
-        // "unmap": a persistent map the application holds outlives every unmap by
-        // definition, and the calls that could redefine such a buffer's store are
-        // errors the frontend refuses before reaching here.
+        // 仅在存储被合法重新定义时退回shadow，调用方随后重设其大小。普通unmap只终结
+        // 应用映射，不要求释放backend存储；持久映射的指针同样在unmap之后不再对应用有效。
+        // 不能把用途切换当成存储重新定义，immutable存储的非法重定义由前端拒绝。
         void ReleasePersistentMap() { m_gpuMapped = nullptr; }
 
         // Backend GPU resource, owned here in both modes.

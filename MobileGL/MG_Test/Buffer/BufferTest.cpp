@@ -2048,6 +2048,55 @@ TEST_F(BufferTest, RedefiningAnAdoptedBufferToZeroBytesLeavesItOnTheShadow) {
 // The negative control for the four above: a backend that DECLINES to hand out a mapping
 // leaves the buffer shadow-backed throughout, so a redefinition is just a redefinition -
 // no adoption to give back, and the backend still gets its Respecify.
+// 映射已发布以后，SSBO用途升级不能释放应用仍持有的地址。这里经过真实GL前端，
+// 与外部无GPU宿主回归一起约束权限查询、偏移和flush行为。
+TEST_F(GeneralBufferTest, ExplicitPersistentMapKeepsItsAddressAcrossGpuUse) {
+    ZeroCopyMockBackend mock;
+    g_zeroCopyMock = &mock;
+    ScopedBackendOps scopedOps(&kZeroCopyMockOps);
+    GLuint buffer = 0;
+    GenBuffers(1, &buffer);
+    BindBuffer(GL_ARRAY_BUFFER, buffer);
+    BufferStorage(GL_ARRAY_BUFFER, 256, nullptr, GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT);
+    auto object = MG_State::pGLContext->GetBufferObject(buffer);
+    auto* mapped = static_cast<Uint8*>(MapBufferRange(GL_ARRAY_BUFFER, 64, 128,
+        GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_FLUSH_EXPLICIT_BIT));
+    ASSERT_NE(mapped, nullptr);
+    ASSERT_TRUE(object->EnsureGpuResidentStorage());
+    EXPECT_EQ(mapped, object->GetMappedPointer());
+    EXPECT_TRUE(object->GetMappingAccess() & BufferMappingAccessBit::FlushExplicit);
+    mapped[5] = 0x6d;
+    FlushMappedBufferRange(GL_ARRAY_BUFFER, 5, 1);
+    EXPECT_EQ(mock.gpu[69], 0x6d);
+    EXPECT_EQ(mock.flushCalls, 0);
+    EXPECT_EQ(GetError(), GL_NO_ERROR);
+    EXPECT_TRUE(UnmapBuffer(GL_ARRAY_BUFFER));
+    g_zeroCopyMock = nullptr;
+}
+
+// 首次backend不能提供存储时，本次shadow映射已经确定地址；恢复能力不能擅自迁移。
+TEST_F(GeneralBufferTest, PublishedShadowMappingRejectsLateResidency) {
+    ZeroCopyMockBackend mock;
+    mock.provideMap = false;
+    g_zeroCopyMock = &mock;
+    ScopedBackendOps scopedOps(&kZeroCopyMockOps);
+    GLuint buffer = 0;
+    GenBuffers(1, &buffer);
+    BindBuffer(GL_ARRAY_BUFFER, buffer);
+    BufferStorage(GL_ARRAY_BUFFER, 128, nullptr, GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT);
+    auto object = MG_State::pGLContext->GetBufferObject(buffer);
+    void* mapped = MapBufferRange(GL_ARRAY_BUFFER, 0, 128,
+        GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_FLUSH_EXPLICIT_BIT);
+    ASSERT_NE(mapped, nullptr);
+    mock.provideMap = true;
+    EXPECT_FALSE(object->EnsureGpuResidentStorage());
+    EXPECT_EQ(mapped, object->GetMappedPointer());
+    EXPECT_TRUE(UnmapBuffer(GL_ARRAY_BUFFER));
+    EXPECT_TRUE(object->EnsureGpuResidentStorage());
+    EXPECT_EQ(GetError(), GL_NO_ERROR);
+    g_zeroCopyMock = nullptr;
+}
+
 TEST_F(BufferTest, RedefiningANonAdoptedBufferIsUnchanged) {
     ZeroCopyMockBackend mock;
     mock.provideMap = false;

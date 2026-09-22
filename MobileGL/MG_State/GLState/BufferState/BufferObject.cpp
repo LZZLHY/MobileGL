@@ -197,8 +197,14 @@ namespace MobileGL::MG_State::GLState {
         MOBILEGL_ASSERT(end <= m_mappedRange.end, "Flush range out of bounds: mappedRange.end (%zu) < end (%zu)",
                         m_mappedRange.end, end);
 
-        // FLUSH_EXPLICIT maps are never GPU-resident (only coherent maps are adopted), so
-        // the staged bytes must be copied into the shadow before the backend reads them.
+        // 应用的显式flush权限与物理存储是否coherent是两个维度。已采用coherent GPU存储时，
+        // 已写字节就是权威数据，不能再走busy copy/orphan路径而更换应用持有的映射地址。
+        // 保留上面的权限和范围校验；未flush范围仍由GL契约定义为未保证内容，不改查询标志。
+        if (m_resource.IsGpuResident()) {
+            NotifyContentWrite(start, length);
+            return;
+        }
+        // 普通映射使用独立staging，只提交本次flush子范围；持久shadow本身已经被应用写入。
         if (!(m_mappingAccess & BufferMappingAccessBit::Persistent)) {
             Memcpy(m_resource.Bytes() + start, m_stagingData.data() + m_stagingBias + offset, length);
         }
@@ -340,6 +346,11 @@ namespace MobileGL::MG_State::GLState {
         if (m_resource.IsGpuResident()) {
             return true;
         }
+        // 已经向应用发布的映射不能迁移：AdoptPersistentMap会释放原shadow，调用方仍持有
+        // 旧地址。GPU用途升级必须继续使用shadow传输/读回，直到unmap后才可重新选择存储。
+        if (m_isMapped) {
+            return false;
+        }
         if (m_size == 0 || g_bufferBackendOps == nullptr || g_bufferBackendOps->AcquirePersistentMap == nullptr) {
             return false;
         }
@@ -365,14 +376,12 @@ namespace MobileGL::MG_State::GLState {
 
         if (access & BufferMappingAccessBit::Persistent) {
             m_ownsStagingData = false;
-            // Zero-copy: for a coherent (non-FLUSH_EXPLICIT) persistent write map, ask the
-            // active backend for host-visible, coherent GPU storage and adopt it as the
-            // single source of truth. The backend seeds it from the current shadow before
-            // returning; AdoptPersistentMap then releases the shadow. Falls back to the
-            // shadow when the backend declines (returns null). Only attempted once - the
-            // storage is immutable and outlives unmap/remap.
-            if (!m_resource.IsGpuResident() && (access & BufferMappingAccessBit::Write) &&
-                !(access & BufferMappingAccessBit::FlushExplicit) && g_bufferBackendOps &&
+            // 在返回持久指针之前确定权威存储，覆盖显式flush及只读映射。实际后端可提供
+            // 更强的coherent可读写存储，但m_mappingAccess仍原样保留应用请求。旧实现只在
+            // coherent写映射时采用GPU存储，随后SSBO绑定又迁移explicit/read的shadow，导致
+            // 应用继续写已释放地址。后端拒绝时保留shadow；EnsureGpuResidentStorage保证
+            // 本次映射期间不再迁移，GPU读回通过既有ReadbackFromGpu更新同一地址。
+            if (!m_resource.IsGpuResident() && g_bufferBackendOps &&
                 g_bufferBackendOps->AcquirePersistentMap) {
                 if (void* base = g_bufferBackendOps->AcquirePersistentMap(*this)) {
                     m_resource.AdoptPersistentMap(base);

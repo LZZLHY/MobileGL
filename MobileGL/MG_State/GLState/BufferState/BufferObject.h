@@ -88,16 +88,11 @@ namespace MobileGL {
             // Final release of the backend resource (called from ~BufferObject).
             // The backend defers actual destruction until the GPU is done with it.
             void (*OnDestroy)(SharedPtr<BackendBufferResource>&& resource) = nullptr;
-            // Zero-copy persistent mapping. For a coherent (non-FLUSH_EXPLICIT) persistent
-            // write map, the backend may hand back a host-visible, COHERENT, persistently
-            // mapped pointer into its own GPU storage for the whole buffer [0, size),
-            // created with every buffer usage and seeded from the shadow. From that point
-            // the GPU buffer is the single source of truth: the app writes into it
-            // directly, all reads/writes resolve against it (HostData()), and NO further
-            // backend transfer ops are dispatched for this buffer. Returns nullptr when the
-            // backend cannot back the map; the frontend then keeps the CPU-shadow model.
-            // Must be idempotent: a second call for an already-backed buffer returns the
-            // same base pointer.
+            // 为整个buffer提供稳定、host-visible、coherent且可读写的GPU存储，种子来自shadow。
+            // 在任一种持久映射发布之前调用，或在没有活动映射时为GPU写入目标调用。
+            // 后端权限必须同时支持CPU读写；不根据应用此次Map标志缩小内部权威存储权限。
+            // 成功后此地址为唯一权威数据，后续flush不得复制/孤立该存储；必须幂等且不迁移。
+            // 返回nullptr时保留shadow，活动映射期间禁止重试迁移；后端通过传输和读回维护数据。
             void* (*AcquirePersistentMap)(BufferObject& bufferObject) = nullptr;
             // Pulls the backend's current contents for the whole buffer into the shadow
             // (through WritebackFromBackend). Only ever called for a buffer the GPU may
@@ -143,10 +138,8 @@ namespace MobileGL {
 
             void* AcquireMemory(Bool markMapped, Bool read, Bool write);
             void* AcquireMemoryRange(Range1D range, Flags<BufferMappingAccessBit> access);
-            // Adopt backend host-visible coherent GPU storage as the source of truth
-            // (used for GPU-written targets like transform feedback capture, so
-            // MapBuffer/GetBufferSubData read real GPU results). No-op when already
-            // resident or when the backend declines.
+            // 无活动映射时可将GPU存储作为权威数据。已有GPU驻留直接成功；已发布shadow映射
+            // 或后端拒绝则返回false，不能释放应用持有的地址；调用方继续走传输/读回路径。
             Bool EnsureGpuResidentStorage();
             void ReleaseMemory();
             void FlushMemoryRange(SizeT offset, SizeT length);

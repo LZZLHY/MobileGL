@@ -174,6 +174,8 @@ namespace MobileGL::MG_Backend::DirectVulkan {
         // below it may be considered signaled. Drives IsResourceBusy and the
         // backend GL fence objects.
         Uint64 GetCompletedSerial() const;
+        // GPU工作完成后，将普通resident副本同步到仍被应用持有的shadow；不移动映射地址。
+        void ReadbackToHost(MG_State::GLState::BufferObject& bufferObject);
         // Busy = potentially referenced by GPU work that has not been fenced yet
         // (including commands recorded for the current, unsubmitted frame).
         Bool IsResourceBusy(const VkBufferResource& resource) const;

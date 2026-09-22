@@ -72,15 +72,14 @@ namespace MobileGL::MG_Backend::DirectVulkan {
             }
         }
 
-        // The CPU is about to read a buffer a shader wrote. Its bytes live in coherent
-        // host-visible GPU storage (EnsureGpuResidentStorage adopts it when the buffer is
-        // bound as a shader storage buffer), so nothing needs copying - but coherence only
-        // says the writes are visible once they have happened, so the work has to retire
-        // first.
+        // CPU读取之前先退休GPU工作。直接GPU映射只需等待；仍有活动shadow映射的buffer
+        // 不允许在SSBO绑定时迁移，必须将真实GPU副本读回原地址，不能把旧shadow当新结果。
         void Ops_ReadbackFromGpu(BufferObject& bufferObject) {
-            (void)bufferObject;
             if (pVulkanRenderer) {
                 pVulkanRenderer->FinishPendingGpuWork();
+            }
+            if (g_activeBufferManager) {
+                g_activeBufferManager->ReadbackToHost(bufferObject);
             }
         }
 
@@ -221,6 +220,21 @@ namespace MobileGL::MG_Backend::DirectVulkan {
         const Uint64 frameCount = m_initInfo.frameCount > 0 ? m_initInfo.frameCount : 1;
         const Uint64 completed = m_frameSerial > frameCount ? m_frameSerial - frameCount : 0;
         return std::max(completed, m_completedSerialFloor);
+    }
+
+    void VkBufferManager::ReadbackToHost(MG_State::GLState::BufferObject& bufferObject) {
+        if (bufferObject.IsBackendPersistentMapped()) return;
+        auto* resource = ResourceOf(bufferObject);
+        if (!resource || !resource->buffer.IsValid()) return;
+        const SizeT size = std::min<SizeT>(bufferObject.GetSize(), resource->storageSize);
+        if (size == 0) return;
+        // 普通resident分配不保证HOST_COHERENT；等待完成后invalidate，再读已映射内存。
+        // 目标仍是原shadow，Writeback不产生反向上传，也不重新分配存储。
+        if (!resource->buffer.Invalidate(size) || resource->buffer.GetMappedData() == nullptr) {
+            MGLOG_E_ONCE("VkBufferManager::ReadbackToHost failed to invalidate mapped storage");
+            return;
+        }
+        bufferObject.WritebackFromBackend({resource->buffer.GetMappedData(), size}, 0);
     }
 
     Bool VkBufferManager::IsResourceBusy(const VkBufferResource& resource) const {
