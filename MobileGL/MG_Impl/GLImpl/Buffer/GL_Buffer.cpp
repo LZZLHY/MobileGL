@@ -1366,8 +1366,16 @@ namespace MobileGL::MG_Impl::GLImpl {
             }
         }
 
-        return bufferObject->AcquireMemoryRange({static_cast<SizeT>(offset), static_cast<SizeT>(offset + length)},
-                                                ApplyCoherentAsFlush(accessBits));
+        void* result = bufferObject->AcquireMemoryRange(
+            {static_cast<SizeT>(offset), static_cast<SizeT>(offset + length)}, ApplyCoherentAsFlush(accessBits));
+        // 与绑定入口使用相同的失败协议；nullptr不能在命名入口被伪装成无错误的成功调用。
+        if (!result) {
+            MG_State::pGLContext->RecordError(
+                ErrorCode::OutOfMemory,
+                MakeUnique<GenericErrorInfo>("MG_Impl/GLImpl", "MapNamedBufferRange_State",
+                                             "Backend could not provide mapped buffer storage."));
+        }
+        return result;
     }
 
     GLboolean UnmapNamedBuffer_State(GLuint buffer) {

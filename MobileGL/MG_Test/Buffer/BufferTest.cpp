@@ -2097,6 +2097,30 @@ TEST_F(GeneralBufferTest, PublishedShadowMappingRejectsLateResidency) {
     g_zeroCopyMock = nullptr;
 }
 
+// GPU后端拒绝可读persistent存储时，core和DSA都必须给出错误且不留下活动映射。
+TEST_F(GeneralBufferTest, ReadablePersistentBackingFailureIsReportedByBothEntrypoints) {
+    ZeroCopyMockBackend mock;
+    mock.provideMap = false;
+    g_zeroCopyMock = &mock;
+    ScopedBackendOps scopedOps(&kZeroCopyMockOps);
+    GLuint buffer = 0;
+    GenBuffers(1, &buffer);
+    BindBuffer(GL_ARRAY_BUFFER, buffer);
+    BufferStorage(GL_ARRAY_BUFFER, 128, nullptr, GL_MAP_READ_BIT | GL_MAP_PERSISTENT_BIT);
+    auto object = MG_State::pGLContext->GetBufferObject(buffer);
+    EXPECT_EQ(MapBufferRange(GL_ARRAY_BUFFER, 0, 128, GL_MAP_READ_BIT | GL_MAP_PERSISTENT_BIT), nullptr);
+    EXPECT_EQ(GetError(), GL_OUT_OF_MEMORY);
+    EXPECT_FALSE(object->IsMapped());
+    EXPECT_EQ(MapNamedBufferRange(buffer, 0, 128, GL_MAP_READ_BIT | GL_MAP_PERSISTENT_BIT), nullptr);
+    EXPECT_EQ(GetError(), GL_OUT_OF_MEMORY);
+    EXPECT_FALSE(object->IsMapped());
+    mock.provideMap = true;
+    EXPECT_NE(MapNamedBufferRange(buffer, 0, 128, GL_MAP_READ_BIT | GL_MAP_PERSISTENT_BIT), nullptr);
+    EXPECT_EQ(GetError(), GL_NO_ERROR);
+    EXPECT_TRUE(UnmapNamedBuffer(buffer));
+    g_zeroCopyMock = nullptr;
+}
+
 TEST_F(BufferTest, RedefiningANonAdoptedBufferIsUnchanged) {
     ZeroCopyMockBackend mock;
     mock.provideMap = false;

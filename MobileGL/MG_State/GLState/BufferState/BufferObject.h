@@ -92,7 +92,8 @@ namespace MobileGL {
             // 在任一种持久映射发布之前调用，或在没有活动映射时为GPU写入目标调用。
             // 后端权限必须同时支持CPU读写；不根据应用此次Map标志缩小内部权威存储权限。
             // 成功后此地址为唯一权威数据，后续flush不得复制/孤立该存储；必须幂等且不迁移。
-            // 返回nullptr时保留shadow，活动映射期间禁止重试迁移；后端通过传输和读回维护数据。
+            // 返回nullptr时，写入型映射可保留shadow且活动期间禁止重试迁移；可读persistent
+            // 映射必须失败，因为API触发的读回无法代理应用对指针的直接读取。
             void* (*AcquirePersistentMap)(BufferObject& bufferObject) = nullptr;
             // Pulls the backend's current contents for the whole buffer into the shadow
             // (through WritebackFromBackend). Only ever called for a buffer the GPU may

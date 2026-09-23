@@ -379,13 +379,23 @@ namespace MobileGL::MG_State::GLState {
             // 在返回持久指针之前确定权威存储，覆盖显式flush及只读映射。实际后端可提供
             // 更强的coherent可读写存储，但m_mappingAccess仍原样保留应用请求。旧实现只在
             // coherent写映射时采用GPU存储，随后SSBO绑定又迁移explicit/read的shadow，导致
-            // 应用继续写已释放地址。后端拒绝时保留shadow；EnsureGpuResidentStorage保证
-            // 本次映射期间不再迁移，GPU读回通过既有ReadbackFromGpu更新同一地址。
+            // 应用继续写已释放地址。仅写映射在后端拒绝时可以保留shadow并按GL调用同步；
+            // EnsureGpuResidentStorage保证本次映射不再迁移，可读映射失败则在下方明确拒绝。
             if (!m_resource.IsGpuResident() && g_bufferBackendOps &&
                 g_bufferBackendOps->AcquirePersistentMap) {
                 if (void* base = g_bufferBackendOps->AcquirePersistentMap(*this)) {
                     m_resource.AdoptPersistentMap(base);
                 }
+            }
+            // 写入型shadow可在后续GL调用时同步到GPU；可读persistent指针却必须持续反映
+            // 未来的GPU写入，API触发的Readback不能代理应用直接解引用。已注册GPU后端而
+            // 无法提供该存储时明确失败，不能悄悄返回会过期的CPU副本；失败不发布映射状态。
+            if ((access & BufferMappingAccessBit::Read) && g_bufferBackendOps && !m_resource.IsGpuResident()) {
+                m_isMapped = false;
+                m_mappingAccess = BufferMappingAccessBit::Null;
+                m_mappedRange = {0, 0};
+                m_stagingBias = 0;
+                return nullptr;
             }
             return m_resource.Bytes() + range.start;
         }
