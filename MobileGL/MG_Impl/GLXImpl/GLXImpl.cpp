@@ -174,7 +174,9 @@ namespace MobileGL::MG_Impl::GLXImpl {
         }
 
         struct ContextObject {
-            Display* XDisplay = nullptr;
+            // X11的Display是全局typedef；下一个EGLDisplay成员也叫Display。
+            // 显式限定只澄清类型查找，仍是同一X11指针，不改字段名/顺序/布局或GLX行为。
+            ::Display* XDisplay = nullptr;
             EGLDisplay Display = EGL_NO_DISPLAY;
             EGLConfig Config = nullptr;
             EGLContext Context = EGL_NO_CONTEXT;
@@ -215,7 +217,8 @@ namespace MobileGL::MG_Impl::GLXImpl {
         }
 
         struct ThreadCurrent {
-            Display* XDisplay = nullptr;
+            // 与ContextObject使用同一个X11全局类型；线程current仅持原指针，不改所有权。
+            ::Display* XDisplay = nullptr;
             GLXDrawableHandle Draw = 0;
             GLXDrawableHandle Read = 0;
             GLXContextHandle Context = nullptr;

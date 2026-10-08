@@ -31,6 +31,18 @@ manifest records provenance and the runner settings used to validate a resume.
 
 ## Desktop Linux workflow
 
+客户端EGL扩展声明另用真实生产库检查：
+
+```sh
+python tools/cts/probe/egl_client_extension_contract.py --library <actual-libMobileGL.so> --output <outside-checkout-report.json> --expect-withdrawn
+```
+
+当前未提供完整`EGL_EXT_platform_base`三个EXT入口，因此不宣告该客户端扩展；
+`EGL_KHR_platform_base`也没有官方Registry扩展身份。两个surface EXT名字仍不可调用，
+这项撤除不代表window/pixmap功能实现。现有core EGL1.5入口与window/pbuffer保持原行为，
+core pixmap仅状态句柄、配置PIXMAP位和legacy getPlatformDisplayEXT属性处理限制另行治理。
+未来可用准确surface capability与合法拒绝/error语义完整提供三个命令，再独立资格后宣告。
+
 The `mobilegl-desktop` target builds `glcts` as an ordinary host executable that
 reaches OpenGL only through `libMobileGL.so`. Both backends run headless with no
 GPU at all, which makes this the cheapest way to measure a single test group

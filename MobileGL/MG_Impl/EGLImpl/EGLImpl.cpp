@@ -444,9 +444,10 @@ namespace MobileGL::MG_Impl::EGLImpl {
             return "OpenGL OpenGL_ES";
         case EGL_EXTENSIONS:
             if (display == EGL_NO_DISPLAY) {
+                // EXT_platform_base需要完整的三个EXT入口；当前只有GetPlatformDisplayEXT，
+                // window/pixmap EXT不存在且pixmap没有真实backend创建路径，不宣告完整扩展。
+                // KHR_platform_base不是Registry扩展名；core EGL1.5和现有兼容入口保持原样。
                 return "EGL_EXT_client_extensions "
-                       "EGL_EXT_platform_base "
-                       "EGL_KHR_platform_base "
                        "EGL_MESA_platform_surfaceless";
             }
             return "EGL_KHR_create_context "
