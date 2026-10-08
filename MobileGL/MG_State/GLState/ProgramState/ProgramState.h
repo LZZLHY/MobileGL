@@ -16,6 +16,9 @@
 namespace MobileGL::MG_State::GLState {
     class ProgramState {
     public:
+        // context 退休时解除唯一 current 绑定，释放仅为 failed relink 留存的执行资源；
+        // 不发 GL 调用，不接管其它 context，也不改变名字表的既有销毁顺序。
+        ~ProgramState() { if (m_currentProgram) m_currentProgram->RemoveCurrentBinding(); }
         // This function WILL actually create the program object.
         // To retrieve created program object, use GetProgramObject()
         Uint CreateProgram();

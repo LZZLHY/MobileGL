@@ -73,6 +73,13 @@ namespace MobileGL::MG_State::GLState {
             m_currentProgram = m_programObjects[program];
         }
 
+        // 只有实际绑定变更才计数；同名重复 UseProgram 不增加 current 引用。
+        // query/uniform 仍用最近 ProgramObject；旧 executable 只供 draw/dispatch。
+        if (previous != m_currentProgram) {
+            if (previous) previous->RemoveCurrentBinding();
+            if (m_currentProgram) m_currentProgram->AddCurrentBinding();
+        }
+
         // A deletion flagged while the program was current takes effect the moment it
         // stops being current.
         if (previous != nullptr && previous != m_currentProgram && previous->GetDeleteStatus()) {

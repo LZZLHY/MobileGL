@@ -863,7 +863,9 @@ namespace MobileGL::MG_Impl::GLImpl {
     }
 
     GLint GetUniformLocation_State(GLuint program, const GLchar* name) {
-        auto& programObject = TryToGetProgramObject(program);
+        // 最近 link 失败时 location query 必须产生 INVALID_OPERATION；current 旧执行
+        // 快照只保护 draw，不能让新 query 借旧 metadata 返回成功或无错的 -1。
+        const auto& programObject = TryToGetLinkedProgramForInterfaceQuery(program, __func__);
         if (!programObject) return -1;
         auto loc = programObject->GetUniformLocation(name);
         MGLOG_D("%s: loc %02d = %s", __func__, loc, name);
@@ -1088,8 +1090,12 @@ namespace MobileGL::MG_Impl::GLImpl {
 
         // Relinking the program an active transform feedback captures from would
         // invalidate its varyings mid-capture (GL 3.3 core 2.11.3).
+        // frozen executable 有新的 backend lifetime；该 TF 约束仍按原 GL 对象 lifetime
+        // 比较，既不因 snapshot 地址不同漏拒，也不误认后来复用相同名字的新对象。
         if (MG_State::pGLContext->IsTransformFeedbackActive() &&
-            MG_State::pGLContext->GetTransformFeedbackProgram().get() == programObject.get()) {
+            MG_State::pGLContext->GetTransformFeedbackProgram() &&
+            MG_State::pGLContext->GetTransformFeedbackProgram()->GetExecutionOwnerLifetimeId() ==
+                programObject->GetExecutionOwnerLifetimeId()) {
             MG_State::pGLContext->RecordError(
                 ErrorCode::InvalidOperation,
                 MakeUnique<GenericErrorInfo>(

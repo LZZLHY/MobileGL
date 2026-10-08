@@ -34,7 +34,10 @@ namespace MobileGL::MG_Util::ShaderTranspiler {
         //    gated, so one L1 key shape can describe two materially different module sets (real
         //    doubles vs demoted-and-flattened) and a blob written under 4 says nothing about
         //    which one it holds.
-        constexpr Uint32 kKeyLayoutVersion = 5u;
+        // 6：链接成功现在要求无 native 后端的优化 IR 不再需要 Float64。旧 layout5
+        // 可能缓存了静默 demote 的成功 link/payload，必须在 L1/L2/L1c 同时隔离；
+        // nativeFloat64 位仍在 L1，不能用广告字符串或 backend 名字替代实际能力。
+        constexpr Uint32 kKeyLayoutVersion = 6u;
 
         // The repo's existing cache epoch (MG_Config::CacheVersion, the seed
         // ProgramFactory::ComputeHash uses). Strictly redundant for an in-memory

@@ -186,7 +186,7 @@ namespace MobileGL::MG_State::GLState {
                 artifacts.generatedSpirv.size());
     }
 
-    void ProgramSpirvTask::GenerateSpirv(const ProgramLinkTask::SpirvHandoff& handoff, const Uint externalIndex,
+    void ProgramSpirvTask::GenerateSpirv(ProgramLinkTask::SpirvHandoff& handoff, const Uint externalIndex,
                                          const Bool deferOutputValidationForDirectVulkan,
                                          const Bool enableSpirvValidation, const Bool nativeFloat64) {
         /* As we passed first stage compilation/linking,
@@ -206,13 +206,18 @@ namespace MobileGL::MG_State::GLState {
             .program = *handoff.reflection.program,
         };
         MGLOG_D("ProgramObject %u: GenerateSpirv - requesting SPIR-V binary from program", externalIndex);
-        auto binaryResult = ShaderCompiler::GetSpirvBinaryFromProgram(binaryAttrib);
-        if (!binaryResult) {
-            DeferLog(std::format("ProgramObject {}: GenerateSpirv - GetSpirvBinaryFromProgram failed", externalIndex));
-            MOBILEGL_ASSERT(binaryResult, "GetSpirvBinaryFromProgram failed");
-            return; // spirvStatus stays false: linked, but not drawable.
+        if (!handoff.precisionQualifiedInput.empty()) {
+            // 非 native 的实际模块已在 A 做精度资格；B 复用，避免两次生成。
+            artifacts.generatedSpirv = Move(handoff.precisionQualifiedInput);
+        } else {
+            auto binaryResult = ShaderCompiler::GetSpirvBinaryFromProgram(binaryAttrib);
+            if (!binaryResult) {
+                DeferLog(std::format("ProgramObject {}: GenerateSpirv - GetSpirvBinaryFromProgram failed", externalIndex));
+                MOBILEGL_ASSERT(binaryResult, "GetSpirvBinaryFromProgram failed");
+                return; // 非精度故障保留原 B 失败合同，不能冒称成功执行。
+            }
+            artifacts.generatedSpirv = Move(binaryResult.value());
         }
-        artifacts.generatedSpirv = Move(binaryResult.value());
         MGLOG_D("ProgramObject %u: GenerateSpirv - generated %zu SPIR-V modules", externalIndex,
                 artifacts.generatedSpirv.size());
 

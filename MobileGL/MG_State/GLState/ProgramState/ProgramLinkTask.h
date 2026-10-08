@@ -109,6 +109,10 @@ namespace MobileGL::MG_State::GLState {
             // GL enum per entry of `in.shaders`, in the same order (GetSpirvBinaryFromProgram
             // walks it to pick the intermediates).
             Vector<GLenum> shaderTypes;
+            // 非 nativeFloat64 的 link 先取得真实模块，精度要求在 phase-A 成功发布前
+            // 裁决。通过后移交这些原始模块给 B，避免重复 GlslangToSpv；native 路径
+            // 仍由原 B 生成，保持其原顺序与字节。此字段只由 A/B worker 持有。
+            Vector<Vector<Uint32>> precisionQualifiedInput;
             // The reflection slice BuildGlobalUboRouting consumes: {program, uniformLocations,
             // uniformIndexInTProgram, tProgramUniformIndexToGl, maxUniformLocation}. Carried
             // as a LinkArtifacts with only those five fields set, so the routing pass can keep

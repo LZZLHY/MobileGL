@@ -65,7 +65,7 @@ namespace MobileGL::MG_State::GLState {
     private:
         void RunBody() override;
 
-        void GenerateSpirv(const ProgramLinkTask::SpirvHandoff& handoff, Uint externalIndex,
+        void GenerateSpirv(ProgramLinkTask::SpirvHandoff& handoff, Uint externalIndex,
                            Bool deferOutputValidationForDirectVulkan, Bool enableSpirvValidation,
                            Bool nativeFloat64);
         void BuildGlobalUboRouting(const ProgramLinkTask::SpirvHandoff& handoff, Uint externalIndex);

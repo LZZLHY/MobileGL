@@ -879,6 +879,20 @@ namespace MobileGL::MG_State::GLState {
 
         Bool GetDeleteStatus() const { return m_deleteStatus; }
         Bool GetLinkStatus() const { return Artifacts().linkStatus; }
+        // 当前绑定只由所属 ProgramState 的 GL 线程增减；它不是 GL 名字的引用计数。
+        // 失败 relink 的 query 仍读取本对象最近的 LinkArtifacts，draw/dispatch 才可
+        // 读取完整旧执行快照。快照具有新 lifetimeId，避免后端把同名新状态误作旧缓存。
+        void AddCurrentBinding() { ++m_currentBindingCount; }
+        void RemoveCurrentBinding() {
+            MOBILEGL_ASSERT(m_currentBindingCount > 0, "current program binding underflow");
+            if (m_currentBindingCount > 0 && --m_currentBindingCount == 0) m_preservedExecutable.reset();
+        }
+        const SharedPtr<ProgramObject>& GetPreservedExecutable() const { return m_preservedExecutable; }
+        // 冻结快照有独立 backend lifetime，但 TF 的“同一 GL program”约束仍归原对象。
+        // 以原 lifetime 比较，避免旧执行快照与名字复用后的新对象混淆。
+        Uint64 GetExecutionOwnerLifetimeId() const {
+            return m_executionOwnerLifetimeId ? m_executionOwnerLifetimeId : m_lifetimeId;
+        }
         // GL_PROGRAM_BINARY_RETRIEVABLE_HINT. MobileGL exposes no program binary format
         // (GL_NUM_PROGRAM_BINARY_FORMATS is 0), so the hint is pure state - which is all
         // ARB_get_program_binary requires of it.
@@ -1587,6 +1601,10 @@ namespace MobileGL::MG_State::GLState {
         // the publish half of the join calls it; see the mutable counters below.
         void BumpLinkObservableVersions() const;
         void AddDefaultFragmentShaderIfMissing();
+        // 在 current 的旧成功 link 被新尝试清空之前执行：先 join 该已安装版本自身的
+        // pending B，落实已缓冲 uniform 写入，再复制全部执行所需元数据/资源/版本。
+        // 非 current 程序继续原 cancel-not-join 行为；重复失败保留同一旧 executable。
+        void PreserveCurrentExecutable();
 
         static Uint64 AllocateLifetimeId();
 
@@ -1624,6 +1642,11 @@ namespace MobileGL::MG_State::GLState {
         GLenum m_requestedXfbBufferMode = GL_INTERLEAVED_ATTRIBS;
 
         Bool m_deleteStatus = false;
+        SizeT m_currentBindingCount = 0;
+        // 与 artifacts 一样，第一次 const query 的 join 也会发布成功结果并退休旧
+        // executable；mutable仅表达这一 GL-thread-owned 读侧发布，不允许 worker写。
+        mutable SharedPtr<ProgramObject> m_preservedExecutable;
+        Uint64 m_executionOwnerLifetimeId = 0;
         Bool m_binaryRetrievableHint = false;
         Bool m_separable = false;
         // Monotone "this program may ever be a pipeline stage" latch; see SetSeparable for why

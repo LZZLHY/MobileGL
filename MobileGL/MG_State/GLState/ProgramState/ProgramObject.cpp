@@ -50,6 +50,9 @@ namespace MobileGL::MG_State::GLState {
             // ONE move, not thirty cross-thread field assignments: the artifacts block is
             // exactly what a link produces, so moving it IS the publish.
             m_artifacts = Move(pending->artifacts);
+            // 新 link 成功即安装新执行版本；旧 fallback 不再需要，及时退休其资源。
+            // 失败时保留，避免多次失败累积新的空/错误快照替换真正旧 executable。
+            if (m_artifacts.linkStatus) m_preservedExecutable.reset();
             // The second bump. The first one happened at ENQUEUE so every backend memo read
             // "stale" for the whole pending window; this one invalidates anything a backend
             // may have cached DURING that window, when m_artifacts still held the previous
@@ -478,8 +481,37 @@ namespace MobileGL::MG_State::GLState {
         MGLOG_D("ProgramObject %u: Default fragment shader added.", m_externalIndex);
     }
 
+    void ProgramObject::PreserveCurrentExecutable() {
+        if (m_currentBindingCount == 0) return;
+        // 当前程序先前的成功答案必须连同其 B 任务结果成立；不能取消仍供旧 draw 使用
+        // 的任务，也不能在复制 shadow 前丢掉 A->B 窗口内已经接受的 uniform 写入。
+        EnsureSpirvJoined();
+        if (!m_artifacts.linkStatus || !m_spirv.spirvStatus) return;
+        auto previous = MakeShared<ProgramObject>(m_externalIndex);
+        previous->m_artifacts = m_artifacts;
+        previous->m_artifacts.program.reset(); // owned reflection 已独立于 glslang arena。
+        previous->m_spirv = m_spirv;
+        previous->m_linkedShaderSnapshot = m_linkedShaderSnapshot;
+        previous->m_binaryRetrievableHint = m_binaryRetrievableHint;
+        previous->m_separable = m_separable;
+        previous->m_tracksUniformWrites = m_tracksUniformWrites;
+        previous->m_uniformWriteSetVersion = m_uniformWriteSetVersion;
+        previous->m_imageUnitVersion = m_imageUnitVersion;
+        previous->m_validateStatus = m_validateStatus;
+        previous->m_backendStateVersion = m_backendStateVersion;
+        previous->m_blockBindingVersion = m_blockBindingVersion;
+        previous->m_uboContentVersion = m_uboContentVersion;
+        previous->m_linkVersion = m_linkVersion;
+        previous->m_executionOwnerLifetimeId = GetExecutionOwnerLifetimeId();
+        // 不复制 name-table ownership、live attach/request maps 或 backend hash memo。
+        // 旧 sampler/image/block 值、TF/resource reflection 与 UBO routing 都属于上面
+        // 两个 owned artifacts；后端按快照新 lifetime 和实取版本重新建立自己的 twin。
+        m_preservedExecutable = Move(previous);
+    }
+
     void ProgramObject::Link(Bool addDefaultFSIfMissingForRenderingPipelineProgram) {
         MGLOG_D("ProgramObject %u: Link start, shaders to link: %zu", m_externalIndex, m_shaders.size());
+        PreserveCurrentExecutable();
         // The last link wins. A link still in flight is computing an answer this call is
         // about to replace, and nothing has observed it yet (an observation would have
         // joined), so it is dropped where it stands - no wait.

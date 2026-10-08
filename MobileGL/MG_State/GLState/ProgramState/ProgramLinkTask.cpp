@@ -743,6 +743,60 @@ namespace MobileGL::MG_State::GLState {
             return;
         }
 
+        // 无原生 Float64 且无等价模拟的后端不能把需要精度的合法 shader 静默降成
+        // float。必须在 phase-A 的成功答案可见之前，用真实模块的合法优化结果裁决；
+        // source 文本、扩展广告或仅类型声明都不是可达运算的证明。全流程纯 CPU，
+        // 只读 env 快照，失败写最近 link/log，不制造 GL error，也不访问 current。
+        if (!env.ConsumesFloat64Natively()) {
+            Vector<GLenum> stages;
+            for (const auto& input : in.shaders) stages.push_back(MG_Util::ConvertShaderStageToGLEnum(input.stage));
+            // 仅glslang实际defaultBlock标记可证明本块由软件owned的default-uniform
+            // routing管理。不能因为GL映射表缺项/名字含内部字样就豁免外部byte布局。
+            Vector<String> managedUniformBlocks;
+            for (Int block = 0; block < artifacts.program->getNumUniformBlocks(); ++block) {
+                const auto& reflection = artifacts.program->getUniformBlock(block);
+                if (reflection.getType() && reflection.getType()->getQualifier().defaultBlock)
+                    managedUniformBlocks.push_back(StripArrayElementSuffix(reflection.name));
+            }
+            auto binary = ShaderCompiler::GetSpirvBinaryFromProgram(
+                ProgramBinaryAttrib{.shaderTypes = stages, .program = *artifacts.program});
+            if (!binary) {
+                artifacts.linkStatus = false;
+                artifacts.infoLog = "Float64 precision qualification could not generate linked SPIR-V.";
+                DeferLog(artifacts.infoLog);
+                return;
+            }
+            spirvHandoff.precisionQualifiedInput = Move(binary.value());
+            for (SizeT i = 0; i < spirvHandoff.precisionQualifiedInput.size(); ++i) {
+                const auto& raw = spirvHandoff.precisionQualifiedInput[i];
+                if (!ShaderCompiler::ModuleDeclaresFloat64(raw)) continue;
+                Vector<Uint32> optimized;
+                // true 在这里仅保留 IR 原宽度用于判断，绝不是伪造 backend 能力；
+                // 实际能力来自上述 env。通过的原始模块在 B 中仍按实际能力处理。
+                const Bool valid = ShaderCompiler::SanitizeAndOptimizeBinary(
+                    raw, optimized, true, in.enableSpirvValidation, true);
+                // 先保宽判断真实数值与typed copy；即使flatten可解码成float，也不能把
+                // 这种数值丢精度当作无需求。只有无wide值、仅剩layout时才检查既有模拟。
+                Bool requiresFloat64 = !valid || ShaderCompiler::ModuleRequiresFloat64(optimized,managedUniformBlocks,false);
+                if (!requiresFloat64 && ShaderCompiler::ModuleRequiresFloat64(optimized,managedUniformBlocks)) {
+                    Vector<Uint32> layoutLowered;
+                    requiresFloat64 = !ShaderCompiler::FlattenFloat64StorageLayout(
+                        optimized,layoutLowered,in.enableSpirvValidation) ||
+                        ShaderCompiler::ModuleRequiresFloat64(layoutLowered,managedUniformBlocks);
+                }
+                if (requiresFloat64) {
+                    artifacts.linkStatus = false;
+                    artifacts.infoLog = std::format(
+                        "Float64 precision unavailable: {} still requires 64-bit floating-point values or external storage layout after optimization; backend has no native Float64 or equivalent emulation.",
+                        MG_Util::ConvertGLEnumToString(stages[i]));
+                    artifacts.program.reset();
+                    spirvHandoff.precisionQualifiedInput.clear();
+                    DeferLog(std::format("ProgramObject {}: Link failed - {}", in.externalIndex, artifacts.infoLog));
+                    return;
+                }
+            }
+        }
+
         // ---- past this point the link cannot fail any more ----
         // Everything left is SPIR-V work, and it belongs to phase B. Hand it what it needs
         // and stop: from the join's point of view this program is now fully linked.

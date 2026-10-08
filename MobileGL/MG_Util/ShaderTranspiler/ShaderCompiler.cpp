@@ -716,6 +716,95 @@ namespace MobileGL {
                 }
             } // namespace
 
+            Bool ShaderCompiler::ModuleRequiresFloat64(const Vector<Uint32>& spirv,
+                                                       const Vector<String>& managedUniformBlocks,
+                                                       const bool checkExternalLayouts) {
+                if (spirv.empty()) return false;
+                auto context = spvtools::BuildModule(
+                    SPV_ENV_VULKAN_1_1, MakeSpirvMessageConsumer("ModuleRequiresFloat64"),
+                    spirv.data(), spirv.size());
+                if (!context) return true;
+                auto* types = context->get_type_mgr();
+                auto* definitions = context->get_def_use_mgr();
+                UnorderedMap<Uint32,String> names;
+                for (const auto& debug : context->module()->debugs2()) {
+                    if (debug.opcode() == spv::Op::OpName && debug.NumInOperands() >= 2)
+                        names[debug.GetSingleWordInOperand(0)] = debug.GetInOperand(1).AsString();
+                }
+                // 只检查函数内实际值及其输入；类型/全局 layout 的存在不等于会执行
+                // 64 位运算。结构与数组中的实际值要递归检查，指针本身只携带地址。
+                const auto wideValue = [&](const auto& self, const spvtools::opt::analysis::Type* type) -> Bool {
+                    if (!type || type->AsPointer()) return false;
+                    // 数组<struct<double>>必须递归实际 element，旧 leaf helper 不检查
+                    // struct，不能复用它把这种整体常量 store 当作32位无需求。
+                    if (const auto* scalar = type->AsFloat()) return scalar->width() == 64;
+                    if (const auto* vector = type->AsVector()) return self(self, vector->element_type());
+                    if (const auto* matrix = type->AsMatrix()) return self(self, matrix->element_type());
+                    if (const auto* array = type->AsArray()) return self(self, array->element_type());
+                    if (const auto* structure = type->AsStruct()) {
+                        for (const auto* member : structure->element_types()) if (self(self, member)) return true;
+                    }
+                    if (const auto* runtimeArray = type->AsRuntimeArray()) return self(self, runtimeArray->element_type());
+                    return false;
+                };
+                Bool required = false;
+                for (auto& function : *context->module()) {
+                    function.ForEachInst([&](spvtools::opt::Instruction* instruction) {
+                        if (wideValue(wideValue, types->GetType(instruction->type_id()))) required = true;
+                        instruction->ForEachInId([&](const Uint32* id) {
+                            const auto* value = definitions->GetDef(*id);
+                            if (value && wideValue(wideValue, types->GetType(value->type_id()))) required = true;
+                            // 活的外部buffer布局同样是64位表示要求。读取uint也不能把前面
+                            // 未读double成员缩成float后移动offset。仅从可达指令引用的真实
+                            // variable判定，死block不拒；默认uniform的软件owned routing
+                            // 依据真实defaultBlock反射标记与其区分，不能用源码关键字/名字
+                            // 猜owned身份。纯数值阶段关闭本项，避免把已有等价layout模拟误拒。
+                            if (checkExternalLayouts && value && value->opcode() == spv::Op::OpVariable && value->NumInOperands() >= 1) {
+                                const auto* pointer = types->GetType(value->type_id());
+                                if (pointer && pointer->AsPointer() &&
+                                    wideValue(wideValue, pointer->AsPointer()->pointee_type())) {
+                                    const auto storage = static_cast<spv::StorageClass>(value->GetSingleWordInOperand(0));
+                                    if (storage == spv::StorageClass::StorageBuffer) required = true;
+                                    if (storage == spv::StorageClass::Uniform) {
+                                        const auto* pointerInstruction = definitions->GetDef(value->type_id());
+                                        Uint32 blockId = pointerInstruction ? pointerInstruction->GetSingleWordInOperand(1) : 0;
+                                        auto* blockType = definitions->GetDef(blockId);
+                                        while (blockType && (blockType->opcode() == spv::Op::OpTypeArray ||
+                                                             blockType->opcode() == spv::Op::OpTypeRuntimeArray)) {
+                                            blockId = blockType->GetSingleWordInOperand(0);blockType = definitions->GetDef(blockId);
+                                        }
+                                        const auto name = names.find(blockId);
+                                        if (name == names.end() || std::find(managedUniformBlocks.begin(),managedUniformBlocks.end(),name->second)==managedUniformBlocks.end())
+                                            required = true;
+                                    }
+                                }
+                            }
+                            // CopyMemory只有pointer operands，但它实际复制pointee存储。
+                            // demote会改其宽度/layout且现有flatten明确不能等价处理；必须
+                            // 检查所复制类型，不能沿普通地址运算的pointer-ignore旁路。
+                            if (value && (instruction->opcode() == spv::Op::OpCopyMemory ||
+                                          instruction->opcode() == spv::Op::OpCopyMemorySized)) {
+                                const auto* type = types->GetType(value->type_id());
+                                if (type && type->AsPointer() && wideValue(wideValue, type->AsPointer()->pointee_type()))
+                                    required = true;
+                            }
+                        });
+                    });
+                }
+                return required;
+            }
+
+            bool ShaderCompiler::FlattenFloat64StorageLayout(const Vector<Uint32>& inputBinary,
+                                                            Vector<Uint32>& outputBinary,
+                                                            const bool enableSpirvValidation) {
+                // 精度需求在调用前已保宽裁决；这里只验证旧的byte-layout等价路径，
+                // 不能先通过数值demote隐藏64位值，再声称需求被优化消去。
+                spvtools::Optimizer optimizer(SPV_ENV_VULKAN_1_1);
+                optimizer.RegisterPass(FlattenFloat64StorageBlockPass::CreateFlattenFloat64StorageBlockPass());
+                return RunOptimizerChecked("FlattenFloat64StorageLayout",optimizer,inputBinary,
+                                           outputBinary,true,enableSpirvValidation);
+            }
+
             Bool ShaderCompiler::ModuleDeclaresFloat64VertexInput(const Vector<Uint32>& spirv) {
                 if (spirv.empty()) {
                     return false;

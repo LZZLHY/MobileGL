@@ -454,6 +454,19 @@ namespace MobileGL {
                 // module (see its header for the two operations that make it decline), which is
                 // what the backends report: no mobile driver can build such a module.
                 static Bool ModuleDeclaresFloat64(const Vector<Uint32>& spirv);
+                // 判定合法优化后的可执行 typed IR 是否仍需要 Float64 值；忽略未使用
+                // 类型声明与纯指针地址，不能以源码关键字或 OpTypeFloat 自校验替代要求。
+                // 解析失败按需要处理，调用方拒绝 link，避免未知模块被当作无精度需求。
+                // managedUniformBlocks由真实glslang defaultBlock标记提供，而非仅名字。
+                // 其它活Uniform块的64位成员即使未读，仍约束应用外部buffer字节布局。
+                static Bool ModuleRequiresFloat64(const Vector<Uint32>& spirv,
+                                                 const Vector<String>& managedUniformBlocks = {},
+                                                 bool checkExternalLayouts = true);
+                // 仅运行既有storage-block→uint[]布局flatten，不做数值demote。调用方
+                // 必须先证明无wide值/copy需求，再以结果核外部64布局是否确已等价消去。
+                static bool FlattenFloat64StorageLayout(const Vector<Uint32>& inputBinary,
+                                                        Vector<Uint32>& outputBinary,
+                                                        bool enableSpirvValidation = false);
 
                 // True when the module is a VERTEX stage that declares a 64-bit float INPUT
                 // variable - `in double`, `in dvec2`, `in dmat3` and so on.

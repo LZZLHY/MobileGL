@@ -608,6 +608,10 @@ namespace MobileGL::MG_State {
                 // gate through GetGeneratedSpirv() deeper inside the same draw, and memoizes
                 // under a version the publish has already superseded.
                 currentProgram->JoinLinkAndSpirv();
+                // 最近 link 失败不撤销已经 current 的旧 executable。query/named setter
+                // 继续看最新失败对象；这里只给执行路径完整旧资源，不伪造 LINK_STATUS。
+                if (!currentProgram->GetLinkStatus() && currentProgram->GetPreservedExecutable())
+                    return currentProgram->GetPreservedExecutable();
                 return currentProgram;
             }
             if (m_boundProgramPipeline == 0) return nullProgram;
@@ -689,6 +693,10 @@ namespace MobileGL::MG_State {
                 // Same join contract as GetProgramForDraw's glUseProgram half - see the note
                 // there. A dispatch reads the same non-artifact versions a draw does.
                 currentProgram->JoinLinkAndSpirv();
+                // dispatch 与 draw 同样消费已安装执行版本，不能以最近失败 metadata
+                // 替换仍 current 的 compute 资源；uniform/query 路径不经过本分支。
+                if (!currentProgram->GetLinkStatus() && currentProgram->GetPreservedExecutable())
+                    return currentProgram->GetPreservedExecutable();
                 return currentProgram;
             }
             if (m_boundProgramPipeline == 0) return nullProgram;

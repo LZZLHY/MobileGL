@@ -31,6 +31,53 @@ manifest records provenance and the runner settings used to validate a resume.
 
 ## Desktop Linux workflow
 
+### Float64 限制与 current/最近链接合同
+
+无 native Float64 且无等价表示路径时，合法 shader 的 parse 仍可成功；链接在
+phase-A 成功发布前检查保宽、合法优化后的真实 IR，所需64位值或外部布局未解决
+则 `LINK_STATUS=false`，program InfoLog 标明阶段与 Float64 要求。不能把 silent
+demote 的成功或后期 no-op draw 当作可用执行。GL4.3/GLSL4.60 的历史声明保持原样，
+这种明确拒绝只是错误输出限制，仍不满足所声明 core 版本的全部必需资格。
+
+仅剩布局且没有wide值/copy需求的SSBO，使用既有flatten-only实际结果证明等价；
+这个路径不会先用数值demote掩盖需求。活外UBO的未读double仍可能约束后续成员offset，
+没有等价布局证明时明确拒绝。软件owned默认uniform由真实glslang `defaultBlock`
+标记区分，不因名字含内部字样或GL表缺项就认定它是owned。未用且已消去的函数/
+表达式继续允许；本轮已验证的native fragment数值/pack路径保留原宽度。既有
+`ProgramSpirvTask` 的64位vertex-input→whole-program demote例外未在此候选修复，
+本轮没有授予64位vertex-input资格，也没有覆盖所有native shader路径。
+
+当前执行与最新链接尝试分别处理：current旧成功对象在新尝试开始前落实自身pending B
+和已接受uniform写入，保存完整owned reflection/routing/UBO/sampler/block/image/TF
+及版本；新失败query/named setter不借旧metadata通过，旧location setter保持原生
+错误边界。仅draw/dispatch可继续消费旧执行快照；成功新link或最终解绑退休旧资源。
+快照的backend lifetime独立，TF原program归属另按原owner lifetime检查，防名字复用。
+非current仍用原异步cancel-not-join行为，不加入新全局manager。
+
+以下独立冷进程入口直接核选定生产DSO，`--expected-library-sha` 必须由调用者对
+实际文件独立取得；报告拒绝覆盖。原生参考先校准数值/像素，库输出不自制golden。
+
+```sh
+python tools/cts/probe/fp64_link_contract.py --mode mobilegl --library <actual-so> --expected-library-sha <host-sha> --fp64 reject --report <outside-checkout-nine.json>
+python tools/cts/probe/fp64_layout_contract.py --mode mobilegl --library <actual-so> --expected-library-sha <host-sha> --fp64 reject --report <outside-checkout-layout.json>
+python tools/cts/probe/fp64_tf_owner_contract.py --mode mobilegl --library <actual-so> --expected-library-sha <host-sha> --report <outside-checkout-tf.json>
+python tools/cts/scripts/run_fp64_cpu_contract.py --source-dir <checkout> --build-dir <actual-linux-Ninja-cache> --output-dir <new-outside-checkout-dir>
+```
+
+本次已验证的DirectGLES用 `reject`，具备真实shaderFloat64的lavapipe DirectVulkan和
+原生desktop参考用 `native`；不能按backend名字预设其它设备也支持。九项场景覆盖
+live外部资源、重复失败/成功relink/退休、unused消去、动态uint精度与旧错误保留；
+layout场景保offset8/16B与实际uint-only等价SSBO；TF场景实际读回三项7.0并区分原/
+其它program；CPU入口只证明生产IR/cache/异步对象合同，不冒充GPU/设备资格。
+current执行保护的实际像素范围为monolithic graphics；separable/pipeline失败重链接
+与真实compute dispatch另需定向资格，不能从这些控制外推全部context执行路线。
+
+CPU入口重用显式缓存的真实Ninja argv/对象，检查checkout归属，保留全部新输出；
+旧epoch控制仅将生产key layout6退回5，实际L1注入的完整payload来自真实合法Float32
+producer，表示旧namespace可携带的成功数据，不虚称从旧GPU库dump了payload。另
+生成只恢复TF旧pointer比较的独立控制库，原候选不被覆盖。完整必需check/唯一完成
+footer及精确阴性均检查，退出码本身不授予PASS；Python `-O` 不删除EGL实际调用。
+
 客户端EGL扩展声明另用真实生产库检查：
 
 ```sh
