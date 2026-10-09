@@ -1306,6 +1306,17 @@ namespace MobileGL::MG_Impl::GLImpl {
         case GL_ACTIVE_TEXTURE:
             *params = MG_State::pGLContext->GetActiveTextureUnit() + GL_TEXTURE0;
             return;
+        case GL_COPY_READ_BUFFER_BINDING:
+        case GL_COPY_WRITE_BUFFER_BINDING: {
+            // COPY读取/写入的名字属于已有context buffer槽，不能查询底层驱动或另存缓存。
+            // 首次为空、BindBuffer切换和DeleteBuffers解绑都由同一个槽维护；这里只读
+            // desktop external index，写一个标量后返回，不消费/覆盖原GL错误。Boolean、
+            // Float、Double及Integer64沿现有GetIntegerv转换接缝共享这一权威查询。
+            const auto target = pname == GL_COPY_READ_BUFFER_BINDING ? BufferTarget::CopyRead : BufferTarget::CopyWrite;
+            const auto& object = MG_State::pGLContext->GetBufferBindingSlot(target).GetBoundObject();
+            *params = object ? static_cast<GLint>(object->GetExternalIndex()) : 0;
+            return;
+        }
         case GL_ARRAY_BUFFER_BINDING: {
             auto& obj = MG_State::pGLContext->GetBufferBindingSlot(BufferTarget::Vertex).GetBoundObject();
             if (obj)
