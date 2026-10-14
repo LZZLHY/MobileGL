@@ -342,14 +342,19 @@ namespace MobileGL::MG_Backend::DirectVulkan {
         auto nativeWindow = reinterpret_cast<NativeWindowType>(m_windowHandle.Handle);
 #if defined(VK_USE_PLATFORM_OHOS)
         if (pVulkanRenderer) {
-            return pVulkanRenderer->RetargetOhosSurface(nativeWindow, m_windowHandle.Width, m_windowHandle.Height);
+            // OHOS保留renderer跨window/pbuffer切换；恢复真实窗口时带回应用最后的请求，
+            // 不能只在构造时授予window资格，否则从后台返回后VSync会永远被忽略。
+            return pVulkanRenderer->RetargetOhosSurface(nativeWindow, m_windowHandle.Width, m_windowHandle.Height,
+                                                       GetRequestedSwapInterval());
         }
 #endif
 
         // Any renderer instance this assignment replaces is destroyed here;
         // fence/timer-query handles stamped with the old generation go stale.
         BumpRendererGeneration();
-        pVulkanRenderer = MakeUnique<MG_Backend::DirectVulkan::VulkanRenderer>(nativeWindow);
+        VulkanRendererConfig config;
+        config.SwapInterval = GetRequestedSwapInterval();
+        pVulkanRenderer = MakeUnique<MG_Backend::DirectVulkan::VulkanRenderer>(nativeWindow, config);
         MOBILEGL_ASSERT(pVulkanRenderer != nullptr, "InitWindowSurface: VulkanRenderer creation failed");
         pVulkanRenderer->Initialize();
         return true;
@@ -465,6 +470,12 @@ namespace MobileGL::MG_Backend::DirectVulkan {
             return {PresentationStatus::DeviceLost, false, 0};
         }
         return BackendObject::SwapEGLBuffers(dpy, draw);
+    }
+
+    void BackendObject_DirectVulkan::SetEGLSwapInterval(Int interval) {
+        // Same lock as SwapEGLBuffers: the renderer reads the request in Present.
+        const std::lock_guard<std::recursive_mutex> lock(m_eglStateMutex);
+        BackendObject::SetEGLSwapInterval(interval);
     }
 
     void BackendObject_DirectVulkan::ReleaseEGLSurface(EGLSurface surface) {
@@ -715,6 +726,7 @@ namespace MobileGL::MG_Backend::DirectVulkan {
         static Bool funcsTableInitialized = false;
         if (!funcsTableInitialized) {
             funcsTable.Present = Present;
+            funcsTable.SetSwapInterval = SetSwapInterval;
             funcsTable.GL.DrawArrays = DrawArrays;
             funcsTable.GL.DrawElements = DrawElements;
             funcsTable.GL.DrawElementsBaseVertex = DrawElementsBaseVertex;
