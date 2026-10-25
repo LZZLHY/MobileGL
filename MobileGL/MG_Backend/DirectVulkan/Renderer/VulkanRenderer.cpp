@@ -12137,13 +12137,17 @@ void main() {
     PresentationResult VulkanRenderer::Present() {
         // 只在驱动确实接受本帧present后置位；之后下一帧准备失败仍保留这个事实。
         bool didPresent = false;
+        // 记录实际提交给 present 的资源；后续重建必须清空，不能在函数返回时读取下一帧
+        // 的新交换链并误称本帧已经按新尺寸出图。失败结果只保留 didPresent 历史事实。
+        VkExtent2D presentedDrawableExtent{};
         const auto failure = [&](VkResult result) -> PresentationResult {
             const auto status = result == VK_ERROR_SURFACE_LOST_KHR ? PresentationStatus::SurfaceLost :
                 result == VK_ERROR_DEVICE_LOST ? PresentationStatus::DeviceLost : PresentationStatus::Failed;
             return {status, didPresent, static_cast<std::int32_t>(result)};
         };
         const auto completed = [&]() -> PresentationResult {
-            return {didPresent ? PresentationStatus::Presented : PresentationStatus::Deferred, didPresent, 0};
+            return {didPresent ? PresentationStatus::Presented : PresentationStatus::Deferred, didPresent, 0,
+                    presentedDrawableExtent.width, presentedDrawableExtent.height};
         };
         if (m_swapchainObject.GetHandle() == VK_NULL_HANDLE || m_presentSuspended) {
             // No usable swapchain: the window was zero-area at initialization, or
@@ -12254,6 +12258,7 @@ void main() {
         auto presentPacket = m_frameContext.GetPresentInfo(m_swapchainObject.GetHandle(), m_imageIndexAcquired);
         auto result = vkQueuePresentKHR(m_presentQueue, &presentPacket.presentInfo);
         didPresent = result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR;
+        if (didPresent) presentedDrawableExtent = m_swapchainObject.GetSurfaceExtent();
         if (result == VK_SUBOPTIMAL_KHR) {
             // Suboptimal is not a reason to rebuild on its own: a driver may report it for a
             // surface whose size and orientation still match what we built from (Android does
@@ -12324,6 +12329,8 @@ void main() {
         }
         if (m_swapchainResizeRequested) {
             MGLOG_D("Present, processing requested swapchain rebuild (resize or swap interval)");
+            // 本帧使用的资源即将退休；下一帧实际呈现后才重新授予尺寸查询资格。
+            presentedDrawableExtent = {};
             if (!RecreateSwapchain()) {
                 m_presentSuspended = true;
                 m_swapchainResizeRequested = false;
@@ -12349,6 +12356,7 @@ void main() {
         } else if (result == VK_ERROR_OUT_OF_DATE_KHR) {
             // Nothing acquired, nothing signaled: safe to rebuild and re-acquire.
             MGLOG_D("Present, vkAcquireNextImageKHR got %d, recreating swapchain", result);
+            presentedDrawableExtent = {};
             if (!RecreateSwapchain()) {
                 m_presentSuspended = true;
                 m_swapchainResizeRequested = false;

@@ -178,6 +178,10 @@ namespace MobileGL::MG_Impl::EGLImpl {
             return EGL_FALSE;
         }
 
+        // 每次尝试先撤销上一帧的窗口尺寸。异常、暂缓、重建及失败都不能让查询继续
+        // 暴露退休资源的旧值；pbuffer 仍由创建时的分配尺寸回答，不被此方法改写。
+        state->UpdateWindowDrawableExtent(dpy, draw, 0, 0);
+
         auto* backendObject = GetBackendObject(state);
         if (!backendObject) {
             MGLOG_E_ONCE("activeBackendObject not initialized!");
@@ -201,6 +205,9 @@ namespace MobileGL::MG_Impl::EGLImpl {
             MGLOG_E_ONCE("eglSwapBuffers failed on thread=%s dpy=%p draw=%p native=%d", CurrentThreadIdString().c_str(), dpy, draw, result.nativeError);
             state->SetError(result.status == MG_Backend::PresentationStatus::SurfaceLost ? EGL_BAD_SURFACE : EGL_CONTEXT_LOST);
             return EGL_FALSE;
+        }
+        if (result.presented && result.status == MG_Backend::PresentationStatus::Presented) {
+            state->UpdateWindowDrawableExtent(dpy, draw, result.drawableWidth, result.drawableHeight);
         }
         // Deferred保持EGL调用成功的兼容语义，但不增加真实present序列。
         return EGL_TRUE;
@@ -296,6 +303,7 @@ namespace MobileGL::MG_Impl::EGLImpl {
                     return EGL_FALSE;
                 }
             }
+            state->UpdateWindowDrawableExtent(oldDisplay, oldDraw, 0, 0);
             MGLOG_D("eglMakeCurrent release succeeded thread=%s", threadId.c_str());
             return EGL_TRUE;
         }
@@ -312,6 +320,12 @@ namespace MobileGL::MG_Impl::EGLImpl {
             state->SetError(EGL_BAD_ACCESS);
             state->MakeCurrent(oldDisplay, oldDraw, oldRead, oldContext);
             return EGL_FALSE;
+        }
+        // 切换 draw 可能使 OHOS renderer 退休原交换链。新旧窗口都要等待各自的下一次
+        // 实际呈现；同一个 draw 的普通重复绑定不撤销现有尺寸，失败路径保留原绑定。
+        if (oldDisplay != dpy || oldDraw != draw) {
+            state->UpdateWindowDrawableExtent(oldDisplay, oldDraw, 0, 0);
+            state->UpdateWindowDrawableExtent(dpy, draw, 0, 0);
         }
         MGLOG_D("eglMakeCurrent attach succeeded thread=%s dpy=%p draw=%p read=%p ctx=%p", threadId.c_str(), dpy, draw,
                 read, ctx);
@@ -335,6 +349,8 @@ namespace MobileGL::MG_Impl::EGLImpl {
         if (!state->DestroySurface(dpy, surface)) {
             return EGL_FALSE;
         }
+        // 当前绑定的 surface 可能仅标记为延迟销毁；立即清除尺寸，不能等句柄移除。
+        state->UpdateWindowDrawableExtent(dpy, surface, 0, 0);
         if (auto* backendObject = MG_Backend::pActiveBackendObject.get()) {
             backendObject->ReleaseEGLSurface(surface);
         }

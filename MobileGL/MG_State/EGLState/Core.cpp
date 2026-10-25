@@ -7,6 +7,7 @@
 // End of Source File Header
 
 #include "Core.h"
+#include <limits>
 #include <EGL/eglext.h>
 
 namespace MobileGL {
@@ -1054,6 +1055,22 @@ namespace MobileGL {
                 surfaceIt->second.Width = std::max<EGLint>(width, 1);
                 surfaceIt->second.Height = std::max<EGLint>(height, 1);
                 return true;
+            }
+
+            void EGLContext::UpdateWindowDrawableExtent(EGLDisplayHandle display, EGLSurfaceHandle surface,
+                                                        Uint32 width, Uint32 height) {
+                // 与 QuerySurface/销毁共享锁，成对发布宽高。调用者持 EGL operation 锁，
+                // 后端结果已经绑定本次 draw surface；无效身份静默忽略，保留原 EGL 错误。
+                const std::lock_guard<std::recursive_mutex> lock(m_mutex);
+                auto it = m_surfaces.find(surface);
+                if (it == m_surfaces.end() || it->second.Display != display) return;
+                auto& object = it->second;
+                if (object.Type != SurfaceType::Window && object.Type != SurfaceType::PlatformWindow) return;
+                const bool valid = !object.DestroyPending && width > 0 && height > 0 &&
+                    width <= static_cast<Uint32>(std::numeric_limits<EGLint>::max()) &&
+                    height <= static_cast<Uint32>(std::numeric_limits<EGLint>::max());
+                object.Width = valid ? static_cast<EGLint>(width) : 0;
+                object.Height = valid ? static_cast<EGLint>(height) : 0;
             }
 
             Bool EGLContext::QuerySurface(EGLDisplayHandle display, EGLSurfaceHandle surface, EGLint attribute,

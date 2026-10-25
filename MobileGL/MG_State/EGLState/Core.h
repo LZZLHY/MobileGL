@@ -82,6 +82,10 @@ namespace MobileGL {
                                                              void* nativePixmap, const EGLAttrib* attribList);
                 Bool DestroySurface(EGLDisplayHandle display, EGLSurfaceHandle surface);
                 Bool ResizeSurface(EGLDisplayHandle display, EGLSurfaceHandle surface, EGLint width, EGLint height);
+                // 接收呈现线程的实际窗口 drawable；零值撤销旧证据，pbuffer 的分配尺寸不受影响。
+                // 这是内部事实发布，不修改 EGL 错误槽，不把退休 surface 或请求值重新确认为有效。
+                void UpdateWindowDrawableExtent(EGLDisplayHandle display, EGLSurfaceHandle surface,
+                                                Uint32 width, Uint32 height);
                 Bool QuerySurface(EGLDisplayHandle display, EGLSurfaceHandle surface, EGLint attribute,
                                   EGLint* value) const;
                 Bool ValidateSurface(EGLSurfaceHandle surface) const;

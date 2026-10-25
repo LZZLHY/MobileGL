@@ -9995,7 +9995,14 @@ namespace MobileGL::MG_Backend::DirectGLES {
         BufferImpl::UboRingOnPresent();
         BufferImpl::UnpackRingOnPresent();
         BufferImpl::TrimBufferPool();
-        return {PresentationStatus::Presented, true, 0};
+        // 只有驱动成功 swap 后查询的 drawable 才能发布给 EGLState；两轴必须同时有效。
+        // 查询失败不否认已经发生的呈现，也不拿创建窗口时的请求尺寸填充实际结果。
+        EGLint width = 0, height = 0;
+        const bool haveExtent = g_EGLFuncs.eglQuerySurface(g_Display, g_Surface, EGL_WIDTH, &width) &&
+            g_EGLFuncs.eglQuerySurface(g_Display, g_Surface, EGL_HEIGHT, &height) && width > 0 && height > 0;
+        return {PresentationStatus::Presented, true, 0,
+                haveExtent ? static_cast<std::uint32_t>(width) : 0u,
+                haveExtent ? static_cast<std::uint32_t>(height) : 0u};
     }
 
     void DestroyEGLContext() {
