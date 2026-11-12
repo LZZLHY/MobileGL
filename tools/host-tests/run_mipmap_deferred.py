@@ -9,16 +9,17 @@ def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--dependency-source',required=True);p.add_argument('--output',required=True);p.add_argument('--cxx',default='g++');p.add_argument('--keep',action='store_true')
     # WSL不能解释Windows Git工作树的绝对gitdir；允许调用者显式交付Windows Git提取的原件，
     # 不重写.git、不设置共享对象库override，也不把临时目录冒充独立Git仓。
-    p.add_argument('--baseline-implementation');p.add_argument('--base-commit');a=p.parse_args()
+    p.add_argument('--baseline-implementation');p.add_argument('--base-commit',required=True);a=p.parse_args()
     source=Path(__file__).resolve().parents[2];deps=Path(a.dependency_source).resolve();out=Path(a.output).resolve();assert not out.is_relative_to(source);out.mkdir(parents=True,exist_ok=False)
     cpp=source/'MobileGL/MG_State/GLState/TextureState/MipmapStorage.cpp';test=source/'tools/host-tests/mipmap_deferred_test.cpp';header=cpp.with_suffix('.h')
     sourceFiles=[cpp,header,cpp.parent/'TextureTypes.h',test];identities={str(f.relative_to(source)):hashlib.sha256(f.read_bytes()).hexdigest()for f in sourceFiles}
     old=out/'original-MipmapStorage.cpp'
     if a.baseline_implementation:
-        assert a.base_commit and len(a.base_commit)==40
+        assert len(a.base_commit)==40
         base=a.base_commit;old.write_bytes(Path(a.baseline_implementation).read_bytes())
     else:
-        base=subprocess.check_output(['git','-C',str(source),'rev-parse','HEAD'],text=True).strip()
+        # 必须显式选择真正的旧基线；提交候选后HEAD已经含修复，不能拿它做old-fail。
+        base=subprocess.check_output(['git','-C',str(source),'rev-parse','--verify',a.base_commit],text=True).strip()
         old.write_bytes(subprocess.check_output(['git','-C',str(source),'show',base+':MobileGL/MG_State/GLState/TextureState/MipmapStorage.cpp']))
     includes=[source/'MobileGL',cpp.parent,deps/'include',deps/'3rdparty',deps/'3rdparty/xxHash',deps/'3rdparty/Vulkan-Headers/include']
     common=[a.cxx,'-std=c++23','-O1','-g',*['-I'+str(x)for x in includes]];steps=[];passed=False
