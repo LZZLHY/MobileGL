@@ -846,6 +846,10 @@ namespace MobileGL::MG_Backend::DirectVulkan {
         MOBILEGL_ASSERT(MG_State::pGLContext, "DirectVulkan::GetTexImage called with null GL context");
         pVulkanRenderer->GetTexImage(target, level, format, type, pixels);
     }
+    Bool PrepareTextureCpuWrite(MG_State::GLState::ITextureObject& texture) {
+        // 没有可用renderer时拒绝写入，不能让失败屏障退化成静默覆盖旧GPU内容。
+        return pVulkanRenderer && MG_State::pGLContext && pVulkanRenderer->PrepareTextureCpuWrite(texture);
+    }
     void GetTextureImage(const SharedPtr<MG_State::GLState::ITextureObject>& texture, TextureUploadTarget uploadTarget,
                          GLint level, GLenum format, GLenum type, GLsizei bufSize, GLvoid* pixels) {
         MOBILEGL_ASSERT(pVulkanRenderer, "DirectVulkan::GetTextureImage called with null VulkanRenderer");

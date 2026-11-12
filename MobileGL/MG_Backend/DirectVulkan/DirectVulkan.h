@@ -101,6 +101,8 @@ namespace MobileGL::MG_Backend::DirectVulkan {
     void ShaderStorageBlockBinding(GLuint program, const GLchar* storageBlockName, GLuint storageBlockBinding);
     void ReadPixels(GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type, void* pixels);
     void GetTexImage(GLenum target, GLint level, GLenum format, GLenum type, GLvoid* pixels);
+    // 前端CPU像素修改前的真实命令顺序边界，不是面向应用的读回或glFinish替代品。
+    Bool PrepareTextureCpuWrite(MG_State::GLState::ITextureObject& texture);
     void GetTextureImage(const SharedPtr<MG_State::GLState::ITextureObject>& texture, TextureUploadTarget uploadTarget,
                          GLint level, GLenum format, GLenum type, GLsizei bufSize, GLvoid* pixels);
     // GL fence sync objects, mapped onto the renderer's frame-serial busy

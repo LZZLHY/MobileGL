@@ -764,6 +764,7 @@ namespace MobileGL::MG_Backend::DirectVulkan {
             funcsTable.GL.GenerateMipmap = GenerateMipmap;
             funcsTable.GL.ReadPixels = ReadPixels;
             funcsTable.GL.GetTexImage = GetTexImage;
+            funcsTable.GL.PrepareTextureCpuWrite = PrepareTextureCpuWrite;
             funcsTable.GL.GetTextureImage = GetTextureImage;
             funcsTable.GL.DispatchCompute = DispatchCompute;
             funcsTable.GL.DispatchComputeIndirect = DispatchComputeIndirect;

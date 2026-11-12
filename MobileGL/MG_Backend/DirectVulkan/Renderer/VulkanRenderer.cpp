@@ -7542,6 +7542,35 @@ void main() {
         return true;
     }
 
+    Bool VulkanRenderer::PrepareTextureCpuWrite(MG_State::GLState::ITextureObject& texture) {
+        if (!m_clearManager || !m_textureManager) return false;
+        // View的pending clear按原始storage身份登记；只取拥有者，不能按view的局部
+        // level/layer再次偏移Materialize内部已经是storage空间的clear范围。
+        auto& storage = texture.GetViewStorageOwner() ? *texture.GetViewStorageOwner() : texture;
+        Vector<PendingClearEntry> pendingClears;
+        const Bool hasClear = m_clearManager->GetPendingClears(&storage, pendingClears);
+        if (!hasClear && !HasPendingRecordedWork()) return true;
+        if (m_frameContext.GetFrameCount() == 0) return false;
+        auto& frame = m_frameContext.GetCurrent();
+        if (hasClear) {
+            // 上次提交失败可能保留已经end但尚未提交的command buffer。Begin会reset它，
+            // 因此必须先成功重提旧buffer；失败时保持原命令和CPU像素，不能用新clear替掉。
+            if (!frame.isCommandRecording && frame.hasCommandBufferRecorded && !FlushPendingCommands())
+                return false;
+            if (!frame.isCommandRecording) m_frameContext.BeginCommandRecording();
+            if (VkRenderPassManager::GetActiveRenderPass() != nullptr)
+                VkRenderPassManager::EndRenderPass(frame.commandBuffer);
+            // 此时前端尚未修改shadow，所以Sync只看到旧的dirty数据；先上传旧数据再clear合法。
+            if (!MaterializePendingClearForTexture(frame.commandBuffer, storage)) return false;
+        }
+        // 仅录制clear仍不够：普通texture upload批次在frame前提交。必须先提交旧frame，
+        // 然后前端才能生成新upload。复用带fence退休的非阻塞提交，正常路径不做CPU读回/idle。
+        // 当前没有完整的逐纹理命令引用集合，因此对已有recording保守建立边界，避免旧draw越序。
+        if (!FlushPendingCommands()) return false;
+        m_lastSampledSetValid = false;
+        return true;
+    }
+
     Bool VulkanRenderer::MaterializePendingClearForTexture(VkCommandBuffer commandBuffer,
                                                            MG_State::GLState::ITextureObject& texture) {
         Vector<PendingClearEntry> pendingClears;

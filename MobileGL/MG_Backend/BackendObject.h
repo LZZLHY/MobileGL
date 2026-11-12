@@ -184,6 +184,9 @@ namespace MobileGL {
             void (*ReadPixels)(GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type,
                                void* pixels);
             void (*GetTexImage)(GLenum target, GLint level, GLenum format, GLenum type, GLvoid* pixels);
+            // 内部写前屏障：调用时像素已验证但CPU shadow/dirty仍未改动。异步后端须先
+            // 提交该写入之前的GPU命令；false要求前端保留原像素。空指针沿同步后端原路径。
+            Bool (*PrepareTextureCpuWrite)(MG_State::GLState::ITextureObject& texture) = nullptr;
             void (*GetTextureImage)(const SharedPtr<MG_State::GLState::ITextureObject>& texture,
                                     TextureUploadTarget uploadTarget, GLint level, GLenum format, GLenum type,
                                     GLsizei bufSize, GLvoid* pixels);

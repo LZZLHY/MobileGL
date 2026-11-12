@@ -36,6 +36,17 @@ namespace MobileGL::MG_Impl::GLImpl {
     Bool GetTexParameteriv_State(GLenum target, GLenum pname, GLint* params);
 
     namespace {
+        // subimage共享写前屏障。校验和unpack成功后调用，失败时不得Map/修改shadow或置dirty。
+        Bool PrepareTextureCpuWrite(const SharedPtr<MG_State::GLState::ITextureObject>& texture) {
+            auto prepare = MG_Backend::gBackendFunctionsTable.GL.PrepareTextureCpuWrite;
+            if (!prepare || prepare(*texture)) return true;
+            MG_State::pGLContext->RecordError(
+                ErrorCode::InvalidOperation,
+                MakeUnique<GenericErrorInfo>("MG_Impl/GLImpl", __func__,
+                                             "Backend could not preserve texture command ordering."));
+            return false;
+        }
+
         void SetTextureBorderColorFromFloats(const SharedPtr<MG_State::GLState::ITextureObject>& textureObject,
                                              const GLfloat* params) {
             textureObject->SetBorderColor(FloatVec4(params[0], params[1], params[2], params[3]));
@@ -859,12 +870,8 @@ namespace MobileGL::MG_Impl::GLImpl {
             return true;
         }
 
-        // Writes the clear into the CPU shadow and marks the whole level dirty, exactly like
-        // TexSubImage*_State does. Shared limitation of the level-granular shadow sync: the
-        // shadow does not reflect GPU-side writes (FBO rendering, imageStore), so a PARTIAL
-        // clear of a GPU-written level re-uploads stale shadow bytes outside the region on
-        // the next sync. Full-level clears (glClearTexImage, or a sub-clear covering the
-        // level) rewrite the entire shadow and are always correct.
+        // clear texture与普通subimage都只上传实际修改区域。CPU shadow可能未包含GPU写过的
+        // 外围像素；整层置脏会用旧副本覆盖它们。写前屏障另外保证先前的GPU clear/draw先提交。
         Bool ClearMipmapRegion(const SharedPtr<MG_State::GLState::TextureObjectMipmap>& textureObject,
                                TextureUploadTarget uploadTarget, GLint level,
                                GLint xoffset, GLint yoffset, GLint zoffset,
@@ -906,6 +913,7 @@ namespace MobileGL::MG_Impl::GLImpl {
                 return false;
             }
 
+            if (!PrepareTextureCpuWrite(textureObject)) return false;
             auto* destination = static_cast<Uint8*>(
                 textureObject->MapMipmapData(uploadTarget, static_cast<Uint>(level)));
             if (!destination) {
@@ -946,7 +954,8 @@ namespace MobileGL::MG_Impl::GLImpl {
                 }
             }
 
-            textureObject->MarkStorageDirty(uploadTarget, static_cast<Uint>(level), true);
+            textureObject->MarkStorageDirtyRegion(uploadTarget, static_cast<Uint>(level),
+                                                   {xoffset, yoffset, zoffset}, {width, height, depth});
             return true;
         }
         // GL 4.6 core 8.6: CopyTexSubImage* is not affected by pixel-store state or by a bound
@@ -1643,6 +1652,7 @@ namespace MobileGL::MG_Impl::GLImpl {
         }
 
         const auto* srcData = static_cast<const Uint8*>(processedPixels);
+        if (!PrepareTextureCpuWrite(textureObject)) { free(processedPixels); return; }
         Uint8* destData = static_cast<Uint8*>(textureMipmapObject->MapMipmapData(textureUploadTarget, level));
         if (destData) {
             for (GLsizei z = 0; z < depth; ++z) {
@@ -1766,6 +1776,7 @@ namespace MobileGL::MG_Impl::GLImpl {
         }
 
         const auto* srcData = static_cast<const Uint8*>(processedPixels);
+        if (!PrepareTextureCpuWrite(textureObject)) { free(processedPixels); return; }
         Uint8* destData = static_cast<Uint8*>(textureMipmapObject->MapMipmapData(textureUploadTarget, level));
 
         if (destData) {
@@ -1840,6 +1851,7 @@ namespace MobileGL::MG_Impl::GLImpl {
 
         const SizeT internalBpp = MG_Util::GetInternalBytesPerPixel(textureObject->GetFormat(), texturePixelDataType);
         const SizeT copySize = static_cast<SizeT>(width) * internalBpp;
+        if (!PrepareTextureCpuWrite(textureObject)) { free(processedPixels); return; }
         Uint8* destData = static_cast<Uint8*>(textureMipmapObject->MapMipmapData(textureUploadTarget, level));
         if (destData) {
             Memcpy(destData + static_cast<SizeT>(xoffset) * internalBpp, processedPixels, copySize);
@@ -5736,6 +5748,7 @@ namespace MobileGL::MG_Impl::GLImpl {
         const SizeT destRowSize = static_cast<SizeT>(texelSize.x()) * internalBpp;
 
         const auto* srcData = static_cast<const Uint8*>(processedPixels);
+        if (!PrepareTextureCpuWrite(textureObject)) { free(processedPixels); return; }
         Uint8* destData = static_cast<Uint8*>(textureMipmapObject->MapMipmapData(textureUploadTarget, level));
         if (destData) {
             for (GLsizei y = 0; y < height; ++y) {
@@ -5744,7 +5757,8 @@ namespace MobileGL::MG_Impl::GLImpl {
                 const SizeT srcRowOffset = static_cast<SizeT>(y) * srcRowSize;
                 Memcpy(destData + destRowOffset, srcData + srcRowOffset, srcRowSize);
             }
-            textureMipmapObject->MarkStorageDirty(textureUploadTarget, level, true);
+            textureMipmapObject->MarkStorageDirtyRegion(textureUploadTarget, level, {xoffset, yoffset, 0},
+                                                        {width, height, 1});
         }
         free(processedPixels);
     }

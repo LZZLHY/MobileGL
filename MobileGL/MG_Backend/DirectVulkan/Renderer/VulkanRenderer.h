@@ -259,6 +259,8 @@ namespace MobileGL::MG_Backend::DirectVulkan {
                                           GLenum destinationType, SizeT destinationRowStride,
                                           Uint8* destinationPixels);
         void GetTexImage(GLenum target, GLint level, GLenum format, GLenum type, GLvoid* pixels);
+        // 提交旧clear/draw后才允许新的CPU subimage变脏，避免upload批次越过先前的GL命令。
+        Bool PrepareTextureCpuWrite(MG_State::GLState::ITextureObject& texture);
         void GetTextureImage(const SharedPtr<MG_State::GLState::ITextureObject>& texture,
                              TextureUploadTarget uploadTarget, GLint level, GLenum format, GLenum type,
                              GLsizei bufSize, GLvoid* pixels);
