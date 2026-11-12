@@ -40,6 +40,13 @@ namespace MobileGL {
 
             class MipmapStorage {
             public:
+                // storage由真实texture owner持有，view共享owner而不复制像素。默认vector复制
+                // 会丢失空层已reserve的capacity，从而破坏Map不新增分配点的承诺，故禁止复制。
+                MipmapStorage() = default;
+                MipmapStorage(const MipmapStorage&) = delete;
+                MipmapStorage& operator=(const MipmapStorage&) = delete;
+                MipmapStorage(MipmapStorage&&) noexcept = default;
+                MipmapStorage& operator=(MipmapStorage&&) noexcept = default;
                 SizeT GetLevelCount() const;
                 void AllocateLevel(Uint level, MipmapInput input);
                 // Discard every level at or above levelCount. AllocateLevel never shrinks, so this
@@ -50,6 +57,10 @@ namespace MobileGL {
                 void* MapData(Uint level);
                 IntVec3 GetTexelSize(Uint level) const;
                 SizeT GetByteSize(Uint level) const;
+                // 元数据查询不物化CPU像素。逻辑大小、已初始化字节和保留容量是不同事实；
+                // capacity不是实际RSS，不能把延迟清零描述成没有地址空间/allocator预留。
+                SizeT GetInitializedByteSize(Uint level) const;
+                SizeT GetReservedByteCapacity(Uint level) const;
                 void MarkDirty(Uint level, bool dirty);
                 bool IsDirty(Uint level) const;
                 // Union a sub-image write's box into the level's pending region and set the
@@ -115,6 +126,8 @@ namespace MobileGL {
 
                 Vector<IntVec3> m_texelSizes;
                 Vector<Vector<Uint8>> m_data;
+                // 与m_data逐层对应。延迟状态下vector.size可以为0，纹理定义和view计算仍用此逻辑大小。
+                Vector<SizeT> m_byteSizes;
                 Vector<bool> m_isDirty;
                 Vector<MipmapDirtyRegion> m_dirtyRegions;
                 // Per level, the disjoint rect list behind m_dirtyRegions' union box.

@@ -2296,7 +2296,7 @@ namespace MobileGL::MG_Impl::GLImpl {
             MGLOG_D("%s: isProxy = true, not allocating", __func__);
         } else {
             DiscardMipmapChainOnBaseRespecification(textureMipmapObject, textureUploadTarget, level);
-            textureMipmapObject->AllocateStorage(textureUploadTarget, level, {{width, height, depth}, internalBytes});
+            textureMipmapObject->AllocateStorage(textureUploadTarget, level, {{width, height, depth}, internalBytes, !pixelUnpackBufferObject && originalPixels == nullptr});
             // The same specific-compressed-format tag glTexImage2D records (see TexImage2D_State):
             // GL 4.6 core 8.5 commits the level to that format, so GL_TEXTURE_COMPRESSED and
             // GL_TEXTURE_INTERNAL_FORMAT must report it - and, less obviously, glCopyImageSubData
@@ -2445,7 +2445,7 @@ namespace MobileGL::MG_Impl::GLImpl {
             MGLOG_D("%s: Allocating %d bytes at mip %d", __func__, internalBytes, level);
             DiscardMipmapChainOnBaseRespecification(textureMipmapObject, textureUploadTarget, level);
             textureMipmapObject->AllocateStorage(textureUploadTarget, level,
-                                                 {{width, height, 1}, internalBytes});
+                                                 {{width, height, 1}, internalBytes, !pixelUnpackBufferObject && originalPixels == nullptr});
             // GL 4.6 core 8.5: a SPECIFIC compressed internalformat (unlike a generic
             // GL_COMPRESSED_* one, where the implementation is free to choose) commits the
             // level to that format - GL_TEXTURE_COMPRESSED must then answer true for it and
@@ -2557,7 +2557,7 @@ namespace MobileGL::MG_Impl::GLImpl {
         auto textureMipmapObject = static_cast<MG_State::GLState::TextureObjectMipmap*>(textureObject.get());
         if (!isProxy) {
             DiscardMipmapChainOnBaseRespecification(textureMipmapObject, textureUploadTarget, level);
-            textureMipmapObject->AllocateStorage(textureUploadTarget, level, {{width, 1, 1}, internalBytes});
+            textureMipmapObject->AllocateStorage(textureUploadTarget, level, {{width, 1, 1}, internalBytes, !pixelUnpackBufferObject && originalPixels == nullptr});
             // After AllocateStorage, which clears the tag. No block-compressed format has a 1D
             // layout, so only the specific-format tag the 2D/3D paths record is skipped here - the
             // request itself still has to be remembered for glClearTexImage (GL 4.6 core 8.19).
@@ -5074,7 +5074,7 @@ namespace MobileGL::MG_Impl::GLImpl {
         for (GLsizei level = 0; level < levels; ++level) {
             const GLsizei levelWidth = std::max<GLsizei>(1, width >> level);
             const SizeT byteSize = ComputeTextureStorageByteSize(textureInternalFormat, levelWidth, 1, 1);
-            textureMipmapObject->AllocateStorage(textureUploadTarget, level, {{levelWidth, 1, 1}, byteSize});
+            textureMipmapObject->AllocateStorage(textureUploadTarget, level, {{levelWidth, 1, 1}, byteSize, true});
             textureMipmapObject->MarkStorageDirty(textureUploadTarget, level, false);
             if (IsCompressedGLInternalFormat(internalformat)) {
                 // After AllocateStorage, which clears the tag. See TexImage1D_State: no compressed
@@ -5148,7 +5148,7 @@ namespace MobileGL::MG_Impl::GLImpl {
                     heightIsLayerCount ? height : std::max<GLsizei>(1, height >> level);
                 const SizeT byteSize =
                     static_cast<SizeT>(levelWidth) * static_cast<SizeT>(levelHeight) * bytesPerPixel;
-                textureMipmapObject->AllocateStorage(uploadTarget, level, {{levelWidth, levelHeight, 1}, byteSize});
+                textureMipmapObject->AllocateStorage(uploadTarget, level, {{levelWidth, levelHeight, 1}, byteSize, true});
                 textureMipmapObject->MarkStorageDirty(uploadTarget, level, false);
                 if (compressedInfo.blockWidth != 0) {
                     // After AllocateStorage, which clears the tag.
@@ -5224,7 +5224,7 @@ namespace MobileGL::MG_Impl::GLImpl {
             const SizeT byteSize = ComputeTextureStorageByteSize(textureInternalFormat, levelWidth, levelHeight,
                                                                  levelDepth);
             textureMipmapObject->AllocateStorage(textureUploadTarget, level,
-                                                 {{levelWidth, levelHeight, levelDepth}, byteSize});
+                                                 {{levelWidth, levelHeight, levelDepth}, byteSize, true});
             textureMipmapObject->MarkStorageDirty(textureUploadTarget, level, false);
             if (compressedInfo.blockWidth != 0) {
                 // After AllocateStorage, which clears the tag.

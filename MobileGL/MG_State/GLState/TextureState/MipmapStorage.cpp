@@ -41,6 +41,7 @@ namespace MobileGL {
                 if (m_data.size() < requiredLevelCount) {
                     m_data.reserve(std::bit_ceil(requiredLevelCount));
                     m_data.resize(requiredLevelCount);
+                    m_byteSizes.resize(requiredLevelCount, 0);
                     m_texelSizes.reserve(std::bit_ceil(requiredLevelCount));
                     m_texelSizes.resize(requiredLevelCount);
                     m_isDirty.resize(requiredLevelCount, false);
@@ -69,7 +70,15 @@ namespace MobileGL {
                     m_dirtyRects[level].clear();
                 }
                 auto& data = m_data[level];
-                data.resize(input.byteSize, 0);
+                // 不淘汰已经物化的有效像素。空层先保留容量而不清零，避免常见FBO空定义
+                // 立即触碰完整CPU页面；MapData随后只在已保留容量内初始化，不新增bad_alloc时点。
+                // reserve依然可能分配虚拟空间/allocator块，因此真实RSS收益须另在目标机验证。
+                if (input.deferCpuInitialization && data.empty()) {
+                    data.reserve(input.byteSize);
+                } else {
+                    data.resize(input.byteSize, 0);
+                }
+                m_byteSizes[level] = input.byteSize;
 
                 // Respecifying a level drops whatever compressed image it used to hold. Without this,
                 // a glTexImage2D or glTexStorage2D over a level a previous glCompressedTexImage2D had
@@ -128,6 +137,7 @@ namespace MobileGL {
                 if (levelCount >= m_data.size()) return;
 
                 m_data.resize(levelCount);
+                m_byteSizes.resize(levelCount);
                 m_texelSizes.resize(levelCount);
                 m_isDirty.resize(levelCount);
                 m_dirtyRegions.resize(levelCount);
@@ -141,9 +151,11 @@ namespace MobileGL {
                 auto& targetData = m_data;
                 MOBILEGL_ASSERT(level < targetData.size(), "UpdateSubData: level out of range");
                 auto& levelData = targetData[level];
-                MOBILEGL_ASSERT(input.size <= levelData.size(), "UpdateSubData: input data larger than allocated");
+                MOBILEGL_ASSERT(input.size <= GetByteSize(level), "UpdateSubData: input data larger than allocated");
 
                 if (input.data && input.size > 0) {
+                    // 完整/部分CPU写入先物化；尚未定义的其余字节选择零值，保留原有确定性。
+                    MapData(level);
                     const Uint8* src = static_cast<const Uint8*>(input.data);
                     // Clamp so a size mismatch can never write past the allocation.
                     Memcpy(levelData.data(), src, std::min(input.size, levelData.size()));
@@ -155,6 +167,9 @@ namespace MobileGL {
                 auto& targetData = m_data;
                 MOBILEGL_ASSERT(level < targetData.size(), "UpdateSubData: level out of range");
                 auto& levelData = targetData[level];
+                // AllocateLevel已申请足够capacity。只给从未CPU使用的层延迟初始化；
+                // 不释放GPU上传后仍可能被CPU clear/copy/压缩读回消费的有效副本。
+                if (levelData.size() < m_byteSizes[level]) levelData.resize(m_byteSizes[level], 0);
                 return levelData.data();
             }
 
@@ -165,8 +180,16 @@ namespace MobileGL {
             }
 
             SizeT MipmapStorage::GetByteSize(Uint level) const {
-                if (level >= m_data.size()) return 0;
-                return m_data[level].size();
+                if (level >= m_byteSizes.size()) return 0;
+                return m_byteSizes[level];
+            }
+
+            SizeT MipmapStorage::GetInitializedByteSize(Uint level) const {
+                return level < m_data.size() ? m_data[level].size() : 0;
+            }
+
+            SizeT MipmapStorage::GetReservedByteCapacity(Uint level) const {
+                return level < m_data.size() ? m_data[level].capacity() : 0;
             }
 
             void MipmapStorage::MarkDirty(Uint level, bool dirty) {
