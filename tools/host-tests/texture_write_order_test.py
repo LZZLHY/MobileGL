@@ -15,16 +15,17 @@ prefix=r'''
 #include <string>
 #include <stdexcept>
 #include <iostream>
-using Bool=bool; template<class T>using Vector=std::vector<T>;
+using Bool=bool;using Uint=unsigned; template<class T>using Vector=std::vector<T>;
 static std::string trace;
-namespace MG_State::GLState {struct ITextureObject {std::shared_ptr<ITextureObject> owner;const auto& GetViewStorageOwner()const{return owner;}};}
+namespace MG_State::GLState {struct ITextureObject {bool dirty=false;std::shared_ptr<ITextureObject> owner;const auto& GetViewStorageOwner()const{return owner;}std::vector<int> GetUploadTargets(){return {0};}unsigned GetMipmapLevelCount(){return 1;}bool IsStorageDirty(int,unsigned){return dirty;}};inline ITextureObject* AsMipmapTexture(ITextureObject* t){return t;}}
+struct Textures{bool syncOk=true,allocated=true;bool HasAllocatedStorage(MG_State::GLState::ITextureObject&){return allocated;}void* SyncTextureAndGetDescriptor(MG_State::GLState::ITextureObject& t){trace+='S';if(syncOk)t.dirty=false;return syncOk?this:nullptr;}};
 struct PendingClearEntry{};
 struct Frame{bool isCommandRecording=false,hasCommandBufferRecorded=false;int commandBuffer=1;};
 struct Frames{int count=1;Frame frame;int GetFrameCount()const{return count;}Frame& GetCurrent(){return frame;}void BeginCommandRecording(){trace+='B';frame.isCommandRecording=true;}};
 struct Clears{bool pending=false;MG_State::GLState::ITextureObject* queried=nullptr;bool GetPendingClears(MG_State::GLState::ITextureObject* t,Vector<PendingClearEntry>& v){queried=t;if(pending)v.push_back({});return pending;}};
 struct VkRenderPassManager{static inline bool active=false;static void* GetActiveRenderPass(){return active?reinterpret_cast<void*>(1):nullptr;}static void EndRenderPass(int){trace+='E';active=false;}};
 struct VulkanRenderer{
- Clears clear;Frames m_frameContext;Clears* m_clearManager=&clear;void* m_textureManager=this;
+ Clears clear;Frames m_frameContext;Textures textures;Clears* m_clearManager=&clear;Textures* m_textureManager=&textures;
  bool materializeOk=true,flushOk=true,m_lastSampledSetValid=true;MG_State::GLState::ITextureObject* materialized=nullptr;
  bool HasPendingRecordedWork(){auto& f=m_frameContext.frame;return f.isCommandRecording||f.hasCommandBufferRecorded;}
  bool MaterializePendingClearForTexture(int,MG_State::GLState::ITextureObject& t){trace+='M';materialized=&t;return materializeOk;}
@@ -36,8 +37,9 @@ suffix=r'''
 static void require(bool v,const char* reason){if(!v)throw std::runtime_error(reason);}
 int main(){
  MG_State::GLState::ITextureObject texture;
- for(int n=0;n<11;n++){
+ for(int n=0;n<15;n++){
   VulkanRenderer r;trace.clear();VkRenderPassManager::active=false;
+  texture.dirty=false;
   if(n==0){require(r.PrepareTextureCpuWrite(texture)&&trace.empty(),"idle must not allocate/submit");}
   if(n==1){r.clear.pending=true;require(r.PrepareTextureCpuWrite(texture)&&trace=="BMF"&&!r.m_lastSampledSetValid,"old clear before submit");}
   if(n==2){r.clear.pending=true;r.materializeOk=false;require(!r.PrepareTextureCpuWrite(texture)&&trace=="BM","failed materialize refuses write");}
@@ -49,13 +51,17 @@ int main(){
   if(n==8){r.m_textureManager=nullptr;require(!r.PrepareTextureCpuWrite(texture)&&trace.empty(),"missing backend refuses write");}
   if(n==9){r.clear.pending=true;r.m_frameContext.frame.hasCommandBufferRecorded=true;r.flushOk=false;require(!r.PrepareTextureCpuWrite(texture)&&trace=="F"&&r.m_frameContext.frame.hasCommandBufferRecorded,"failed previous submit must not reset old buffer");}
   if(n==10){r.clear.pending=true;r.m_frameContext.frame.hasCommandBufferRecorded=true;require(r.PrepareTextureCpuWrite(texture)&&trace=="FBMF","resubmit ended old buffer before recording later clear");}
+  if(n==11){texture.dirty=true;require(r.PrepareTextureCpuWrite(texture)&&trace=="S"&&!texture.dirty,"snapshot old CPU patch before next partial write");}
+  if(n==12){texture.dirty=true;r.textures.syncOk=false;require(!r.PrepareTextureCpuWrite(texture)&&trace=="S"&&texture.dirty,"failed snapshot refuses later CPU mutation");}
+  if(n==13){texture.dirty=true;r.m_frameContext.frame.isCommandRecording=true;require(r.PrepareTextureCpuWrite(texture)&&trace=="FS","submit old GPU work before new upload snapshot");}
+  if(n==14){texture.dirty=true;r.textures.allocated=false;require(r.PrepareTextureCpuWrite(texture)&&trace.empty()&&texture.dirty,"CPU-only incomplete texture must not create GPU image");}
  }
- std::cout<<"texture write barrier: 11 production-function cases passed\n";
+ std::cout<<"texture write barrier: 15 production-function cases passed\n";
 }
 '''
 def linux(path):
  q=Path(path).as_posix();return '/mnt/'+q[0].lower()+q[2:]
-receipt={'at':datetime.now().astimezone().isoformat(),'source':str(source),'sourceSha256':hashlib.sha256(source.read_bytes()).hexdigest(),'scope':'production renderer method with explicit frame/clear/submit test doubles; not full GPU or GL entry point qualification','cases':11,'passed':False,'steps':[]}
+receipt={'at':datetime.now().astimezone().isoformat(),'source':str(source),'sourceSha256':hashlib.sha256(source.read_bytes()).hexdigest(),'scope':'production renderer method with explicit frame/clear/submit test doubles; not full GPU or GL entry point qualification','cases':15,'passed':False,'steps':[]}
 try:
  for label,body,expect in [('candidate',function,0),('removed-submit-negative',function.replace('if (!FlushPendingCommands()) return false;','/* negative: deliberately omit submission */'),None)]:
   cpp=out/(label+'.cpp');exe=out/(label+'.exe');cpp.write_text(prefix+body+suffix,encoding='utf-8',newline='\n')

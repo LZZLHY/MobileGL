@@ -7547,9 +7547,27 @@ void main() {
         // View的pending clear按原始storage身份登记；只取拥有者，不能按view的局部
         // level/layer再次偏移Materialize内部已经是storage空间的clear范围。
         auto& storage = texture.GetViewStorageOwner() ? *texture.GetViewStorageOwner() : texture;
+        const auto snapshotCpuWrites = [&]() -> Bool {
+            // 仅定义level1、尚无level0的纹理也允许CPU subimage；没有GPU backing时
+            // 不存在要保留的GPU外围，不能为了快照强制创建尚未完整定义的VkImage。
+            if (!m_textureManager->HasAllocatedStorage(storage)) return true;
+            auto* mipmap = MG_State::GLState::AsMipmapTexture(&storage);
+            if (!mipmap) return true;
+            for (auto target : storage.GetUploadTargets()) {
+                for (Uint level = 0; level < mipmap->GetMipmapLevelCount(); ++level) {
+                    if (mipmap->IsStorageDirty(target, level)) {
+                        // 上一个CPU patch先复制到独立staging快照；否则两个L形/分散区域被
+                        // dirty包围盒合并后，会把未改过的旧shadow字节覆盖回GPU。这里只在
+                        // 存在真实dirty时同步，不触碰全新NULL纹理；小上传仍复用既有batch。
+                        return m_textureManager->SyncTextureAndGetDescriptor(storage) != nullptr;
+                    }
+                }
+            }
+            return true;
+        };
         Vector<PendingClearEntry> pendingClears;
         const Bool hasClear = m_clearManager->GetPendingClears(&storage, pendingClears);
-        if (!hasClear && !HasPendingRecordedWork()) return true;
+        if (!hasClear && !HasPendingRecordedWork()) return snapshotCpuWrites();
         if (m_frameContext.GetFrameCount() == 0) return false;
         auto& frame = m_frameContext.GetCurrent();
         if (hasClear) {
@@ -7568,7 +7586,7 @@ void main() {
         // 当前没有完整的逐纹理命令引用集合，因此对已有recording保守建立边界，避免旧draw越序。
         if (!FlushPendingCommands()) return false;
         m_lastSampledSetValid = false;
-        return true;
+        return snapshotCpuWrites();
     }
 
     Bool VulkanRenderer::MaterializePendingClearForTexture(VkCommandBuffer commandBuffer,

@@ -71,6 +71,8 @@ public:
     // Bumped whenever any tracked texture resource is erased; cached
     // TextureResource pointers are valid only while this is unchanged.
     Uint64 GetResourceEraseEpoch() const { return m_resourceEraseEpoch; }
+    // 纯身份查询，不分配/不同步。没有GPU backing的未完整mip定义应继续留在CPU侧。
+    Bool HasAllocatedStorage(MG_State::GLState::ITextureObject& texture) const;
 
     struct TextureIdentity {
         MG_State::GLState::ITextureObject* texture = nullptr;

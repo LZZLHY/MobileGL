@@ -1280,6 +1280,11 @@ namespace MobileGL::MG_Backend::DirectVulkan {
         return view;
     }
 
+    Bool VkTextureManager::HasAllocatedStorage(MG_State::GLState::ITextureObject& texture) const {
+        const auto it = m_textureResources.find(MakeTextureIdentity(&texture));
+        return it != m_textureResources.end() && it->second.image != VK_NULL_HANDLE;
+    }
+
     void VkTextureManager::StampTextureRecordingUse(MG_State::GLState::ITextureObject* texture) {
         if (texture == nullptr) {
             return;
