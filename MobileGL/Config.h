@@ -79,6 +79,12 @@ namespace MobileGL::MG_Config {
         // MOBILEGL_ENABLE_SPIRV_VALIDATION: validate generated and transformed SPIR-V.
         // Disabled by default because validation is a diagnostics-only cost.
         Bool EnableSpirvValidation = false;
+        // 显式开发诊断；只复制既有CPU状态，不改变GL/Vulkan状态或发起GPU同步。
+        Bool DrawCapture = false;
+        String DrawCapturePath;
+        String DrawCaptureMatch;
+        Uint32 DrawCaptureSkip = 120;
+        Uint32 DrawCaptureCount = 32;
         // MOBILEGL_USE_ANGLE: load ANGLE EGL/GLES libraries.
         Bool UseAngle = false;
 #if defined(MOBILEGL_TRACE_ANGLE_VARIANTS)

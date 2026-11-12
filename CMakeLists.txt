@@ -388,7 +388,8 @@ set(SOURCE_FILES
     MobileGL/MG_Backend/DirectVulkan/Renderer/FrameContext.cpp
     MobileGL/MG_Backend/DirectVulkan/Renderer/PipelineFactory.cpp
     MobileGL/MG_Backend/DirectVulkan/Renderer/ProgramFactory.cpp
-        MobileGL/MG_Backend/DirectVulkan/Renderer/UniformManager.cpp
+    MobileGL/MG_Backend/DirectVulkan/Renderer/UniformManager.cpp
+    MobileGL/MG_Backend/DirectVulkan/Renderer/DrawStateCapture.cpp
     MobileGL/MG_Backend/DirectVulkan/Renderer/BufferArena.cpp
     MobileGL/MG_Backend/DirectVulkan/Renderer/VkBufferManager.cpp
     MobileGL/MG_Backend/DirectVulkan/Renderer/VertexInputStateBuilder.cpp

@@ -164,6 +164,11 @@ namespace MobileGL::MG_ConfigLoader {
         features.DisableTimerQuery = QueryEnvFlag("MOBILEGL_DISABLE_TIMERQUERY");
         features.EnableGlesTextureView = QueryEnvFlag("MOBILEGL_ENABLE_GLES_TEXTURE_VIEW");
         features.EnableSpirvValidation = QueryEnvFlag("MOBILEGL_ENABLE_SPIRV_VALIDATION");
+        features.DrawCapture = QueryEnvFlag("MOBILEGL_DRAW_CAPTURE");
+        QueryEnvVariable("MOBILEGL_DRAW_CAPTURE_PATH", features.DrawCapturePath, "");
+        QueryEnvVariable("MOBILEGL_DRAW_CAPTURE_MATCH", features.DrawCaptureMatch, "");
+        features.DrawCaptureSkip = QueryEnvUint32("MOBILEGL_DRAW_CAPTURE_SKIP", 120, 0, 10000);
+        features.DrawCaptureCount = QueryEnvUint32("MOBILEGL_DRAW_CAPTURE_COUNT", 32, 1, 64);
         features.UseAngle = QueryEnvFlag("MOBILEGL_USE_ANGLE");
 #if defined(MOBILEGL_TRACE_ANGLE_VARIANTS)
         QueryEnvVariable("MOBILEGL_TRACE_ANGLE_VARIANT", features.TraceAngleVariant, "");

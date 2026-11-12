@@ -7,6 +7,7 @@
 // End of Source File Header
 
 #include "UniformManager.h"
+#include "DrawStateCapture.h"
 
 #include "MG_Backend/DirectVulkan/DirectVulkanResourceState.h"
 #include "MG_State/GLState/Core.h"
@@ -2195,6 +2196,9 @@ namespace MobileGL::MG_Backend::DirectVulkan {
                                                              const SamplerBindingOverride* samplerBindingOverride,
                                                              Bool samplerDescriptorsUnchangedHint,
                                                              const Vector<SamplerBindingOverride>* samplerBindingOverrides) {
+        // 诊断仅复制本次真实program/variant与CPU状态，覆盖下方动态offset快速返回。
+        // 这是bind尝试快照，不提前resolve纹理、不上传、不读回GPU，也不将尝试称为已绘制。
+        CaptureProgramBinding(program, programObj, frameIndex, bindPoint);
         // This program has a descriptor MobileGL could not resolve (see
         // VkProgramObject::declinedDescriptors). Refusing here is the whole of the decline: the
         // binding is still declared in the layout, so the pipeline is consistent with the shader
