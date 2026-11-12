@@ -707,7 +707,8 @@ private:
     // Bump-allocates `size` staging bytes for the open batch, growing onto a
     // new/pooled block when the current one cannot fit. Returns the write
     // pointer; outBuffer/outBaseOffset locate the space for copy commands.
-    Uint8* AcquireUploadStagingSpace(VkDeviceSize size, VkBuffer& outBuffer, VkDeviceSize& outBaseOffset);
+    Uint8* AcquireUploadStagingSpace(VkDeviceSize size, VkBuffer& outBuffer, VkDeviceSize& outBaseOffset,
+                                     VkDeviceSize alignment);
     void RecycleUploadStagingBlock(UploadStagingBlock&& block);
     // Drops a recorded-but-unsubmitted batch on the floor. Shutdown only: the
     // device is being torn down, so the lost texel data is unobservable.

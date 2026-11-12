@@ -9,6 +9,7 @@
 #include "VkTextureManager.h"
 
 #include "ProgramFactory.h"
+#include "TextureUploadRegion.h"
 
 #include "MG_State/GLState/Core.h"
 #include "MG_Util/Converters/MGToStr/TextureEnumConverter.h"
@@ -20,6 +21,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <numeric>
 #include <vulkan/utility/vk_format_utils.h>
 
 namespace MobileGL::MG_Backend::DirectVulkan {
@@ -2401,16 +2403,14 @@ namespace MobileGL::MG_Backend::DirectVulkan {
     }
 
     Uint8* VkTextureManager::AcquireUploadStagingSpace(VkDeviceSize size, VkBuffer& outBuffer,
-                                                       VkDeviceSize& outBaseOffset) {
-        // 16 covers every uncompressed texel size in use (1..16 bytes) and the
-        // bufferOffset multiple-of-4 rule; per-item offsets inside the span
-        // keep the pre-batching tight packing.
-        constexpr VkDeviceSize kUploadStagingAlignment = 16;
+                                                       VkDeviceSize& outBaseOffset, VkDeviceSize alignment) {
+        // 调用方按实际VkFormat块大小和4字节copy要求求公倍数；3/6/12字节纹理
+        // 不能使用固定16字节位运算对齐，staging基址和每个item都须满足同一约束。
         constexpr VkDeviceSize kUploadStagingBlockSize = 1u * 1024u * 1024u;
         UploadStagingBlock* current = m_uploadBatchBlocks.empty() ? nullptr : &m_uploadBatchBlocks.back();
         VkDeviceSize alignedCursor = 0;
         if (current != nullptr) {
-            alignedCursor = (current->cursor + (kUploadStagingAlignment - 1)) & ~(kUploadStagingAlignment - 1);
+            alignedCursor = ((current->cursor + alignment - 1) / alignment) * alignment;
             if (alignedCursor + size > current->capacity) {
                 current = nullptr;
             }
@@ -2830,12 +2830,14 @@ namespace MobileGL::MG_Backend::DirectVulkan {
             IntVec3 texelSize = {0, 0, 0};
             const void* source = nullptr;
             Vector<Uint8> expandedData;
+            // 转换型上传先提取局部块，转换后source已经紧密排列，不能再按整层stride二次裁剪。
+            Vector<Uint8> packedData;
+            IntVec3 sourceTexelSize = {0, 0, 0};
+            Bool sourceAlreadyPacked = false;
             VkDeviceSize offset = 0;
             // Sub-region upload (a small sprite in a big atlas): only the dirty box
             // is staged and copied. texelSize keeps the LEVEL extent - the staging
-            // row copy needs it for the shadow's stride. Plain color formats only;
-            // the RGB-expand and depth(+stencil) conversion passes rewrite whole
-            // levels and stay full-size.
+            // row copy needs it for the shadow's stride. 转换型格式另用sourceTexelSize描述局部payload。
             Bool subRegion = false;
             IntVec3 regionLo = {0, 0, 0};
             IntVec3 regionSize = {0, 0, 0};
@@ -2856,6 +2858,12 @@ namespace MobileGL::MG_Backend::DirectVulkan {
             targets.push_back(uploadTarget);
         }
         const TextureFormatInfo formatInfo = ResolveTextureFormatInfo(mipmapTexture.GetFormat());
+        const auto copyAspects = GetAspectMaskForFormat(outResource.format);
+        const VkDeviceSize copyAlignment = copyAspects == VK_IMAGE_ASPECT_COLOR_BIT
+            ? std::lcm<VkDeviceSize>(4, std::max<Uint32>(1, vkuFormatTexelBlockSize(outResource.format))) : 4;
+        const auto alignCopy = [copyAlignment](VkDeviceSize value) {
+            return ((value + copyAlignment - 1) / copyAlignment) * copyAlignment;
+        };
 
         VkDeviceSize stagingSize = 0;
         for (const TextureUploadTarget target : targets) {
@@ -2895,11 +2903,12 @@ namespace MobileGL::MG_Backend::DirectVulkan {
                 // per-layer copy the swapped size describes reads the same bytes in the same
                 // order as the row-major level it replaces.
                 uploadItem.texelSize = ToVulkanLevelExtent(mipmapTexture.GetTarget(), texelSize);
+                uploadItem.sourceTexelSize = uploadItem.texelSize;
                 uploadItem.source = source;
+                stagingSize = alignCopy(stagingSize);
                 uploadItem.offset = stagingSize;
                 uploadItem.uploadByteSize = byteSize;
-                if (!formatInfo.expandRgbToRgba &&
-                    GetAspectMaskForFormat(outResource.format) == VK_IMAGE_ASPECT_COLOR_BIT) {
+                {
                     const auto region = mipmapTexture.GetStorageDirtyRegion(target, level);
                     const SizeT texelCount = static_cast<SizeT>(texelSize.x()) *
                                              static_cast<SizeT>(texelSize.y()) *
@@ -2922,15 +2931,16 @@ namespace MobileGL::MG_Backend::DirectVulkan {
                         // to avoid paying twice.
                         MG_State::GLState::MipmapDirtyRegion
                             dirtyRects[MG_State::GLState::MipmapStorage::kMaxDirtyRects];
-                        const SizeT dirtyRectCount = mipmapTexture.GetStorageDirtyRects(
-                            target, level, dirtyRects, MG_State::GLState::MipmapStorage::kMaxDirtyRects);
+                        const SizeT dirtyRectCount = !formatInfo.expandRgbToRgba && copyAspects == VK_IMAGE_ASPECT_COLOR_BIT
+                            ? mipmapTexture.GetStorageDirtyRects(target, level, dirtyRects,
+                                                                MG_State::GLState::MipmapStorage::kMaxDirtyRects) : 0;
                         if (dirtyRectCount >= 2) {
                             uploadItem.rects.assign(dirtyRects, dirtyRects + dirtyRectCount);
-                            SizeT rectTexels = 0;
+                            SizeT packedRectBytes = 0;
                             for (const auto& rect : uploadItem.rects) {
-                                rectTexels += rect.TexelCount();
+                                packedRectBytes = alignCopy(packedRectBytes) + rect.TexelCount() * uploadItem.texelBytes;
                             }
-                            uploadItem.uploadByteSize = rectTexels * uploadItem.texelBytes;
+                            uploadItem.uploadByteSize = packedRectBytes;
                         }
                         // The boxes came out of the shadow in GL coordinates, where a 1D
                         // array's layer is the y. They have to follow texelSize across to z or
@@ -2951,8 +2961,22 @@ namespace MobileGL::MG_Backend::DirectVulkan {
                         }
                     }
                 }
+                if (uploadItem.subRegion && (formatInfo.expandRgbToRgba || copyAspects != VK_IMAGE_ASPECT_COLOR_BIT)) {
+                    const auto& full = uploadItem.texelSize;
+                    const auto& lo = uploadItem.regionLo;
+                    const auto& size = uploadItem.regionSize;
+                    if (!PackTextureUploadRegion(source, byteSize,
+                            {SizeT(full.x()), SizeT(full.y()), SizeT(full.z())},
+                            {SizeT(lo.x()), SizeT(lo.y()), SizeT(lo.z())},
+                            {SizeT(size.x()), SizeT(size.y()), SizeT(size.z())},
+                            uploadItem.texelBytes, uploadItem.packedData)) return false;
+                    uploadItem.source = uploadItem.packedData.data();
+                    uploadItem.sourceTexelSize = uploadItem.regionSize;
+                    uploadItem.sourceAlreadyPacked = true;
+                }
                 if (formatInfo.expandRgbToRgba) {
-                    const Bool expanded = ExpandRgbSourceToRgba(source, byteSize, texelSize, formatInfo,
+                    const Bool expanded = ExpandRgbSourceToRgba(uploadItem.source, uploadItem.uploadByteSize,
+                                                                uploadItem.sourceTexelSize, formatInfo,
                                                                 uploadItem.expandedData);
                     MOBILEGL_ASSERT(expanded,
                                     "UploadDirtyMipLevels: failed to expand RGB textureId=%d target=%s level=%u to RGBA staging data",
@@ -2991,9 +3015,9 @@ namespace MobileGL::MG_Backend::DirectVulkan {
             }
             stagingSize = 0;
             for (auto& item : uploadItems) {
-                const SizeT texelCount = static_cast<SizeT>(item.texelSize.x()) *
-                                         static_cast<SizeT>(item.texelSize.y()) *
-                                         static_cast<SizeT>(std::max(item.texelSize.z(), 1));
+                const SizeT texelCount = static_cast<SizeT>(item.sourceTexelSize.x()) *
+                                         static_cast<SizeT>(item.sourceTexelSize.y()) *
+                                         static_cast<SizeT>(std::max(item.sourceTexelSize.z(), 1));
                 const SizeT shadowTexelSize = item.uploadByteSize / std::max<SizeT>(texelCount, 1);
                 MOBILEGL_ASSERT(shadowTexelSize == 4 || shadowTexelSize == 8,
                                 "UploadDirtyMipLevels: unexpected depth-stencil shadow texel size %zu for textureId=%d",
@@ -3037,6 +3061,7 @@ namespace MobileGL::MG_Backend::DirectVulkan {
                 item.expandedData = Move(deinterleaved);
                 item.source = item.expandedData.data();
                 item.uploadByteSize = item.expandedData.size();
+                stagingSize = alignCopy(stagingSize);
                 item.offset = stagingSize;
                 stagingSize += static_cast<VkDeviceSize>(item.uploadByteSize);
             }
@@ -3052,9 +3077,9 @@ namespace MobileGL::MG_Backend::DirectVulkan {
             const Bool dstIsD24Word = outResource.format == VK_FORMAT_X8_D24_UNORM_PACK32;
             stagingSize = 0;
             for (auto& item : uploadItems) {
-                const SizeT texelCount = static_cast<SizeT>(item.texelSize.x()) *
-                                         static_cast<SizeT>(item.texelSize.y()) *
-                                         static_cast<SizeT>(std::max(item.texelSize.z(), 1));
+                const SizeT texelCount = static_cast<SizeT>(item.sourceTexelSize.x()) *
+                                         static_cast<SizeT>(item.sourceTexelSize.y()) *
+                                         static_cast<SizeT>(std::max(item.sourceTexelSize.z(), 1));
                 const SizeT shadowTexelSize = item.uploadByteSize / std::max<SizeT>(texelCount, 1);
                 const Bool needsConversion =
                     (dstIsFloat && !shadowIsFloat) || (dstIsD24Word && shadowTexelSize == 4 && !shadowIsFloat);
@@ -3082,6 +3107,7 @@ namespace MobileGL::MG_Backend::DirectVulkan {
                     item.source = item.expandedData.data();
                     item.uploadByteSize = item.expandedData.size();
                 }
+                stagingSize = alignCopy(stagingSize);
                 item.offset = stagingSize;
                 stagingSize += static_cast<VkDeviceSize>(item.uploadByteSize);
             }
@@ -3108,10 +3134,10 @@ namespace MobileGL::MG_Backend::DirectVulkan {
         VkCommandBuffer commandBuffer = EnsureUploadBatchOpen();
         VkBuffer stagingBuffer = VK_NULL_HANDLE;
         VkDeviceSize stagingBase = 0;
-        Uint8* mapped = AcquireUploadStagingSpace(stagingSize, stagingBuffer, stagingBase);
+        Uint8* mapped = AcquireUploadStagingSpace(stagingSize, stagingBuffer, stagingBase, copyAlignment);
         for (const auto& item : uploadItems) {
             Uint8* dst = mapped + item.offset;
-            if (!item.subRegion) {
+            if (!item.subRegion || item.sourceAlreadyPacked) {
                 std::memcpy(dst, item.source, item.uploadByteSize);
                 continue;
             }
@@ -3138,8 +3164,10 @@ namespace MobileGL::MG_Backend::DirectVulkan {
                        static_cast<SizeT>(boxSize.z()) * item.texelBytes;
             };
             if (!item.rects.empty()) {
+                SizeT packedOffset = 0;
                 for (const auto& rect : item.rects) {
-                    dst += packBox(dst, rect.lo,
+                    packedOffset = alignCopy(packedOffset);
+                    packedOffset += packBox(dst + packedOffset, rect.lo,
                                    IntVec3{rect.hi.x() - rect.lo.x(), rect.hi.y() - rect.lo.y(),
                                            rect.hi.z() - rect.lo.z()});
                 }
@@ -3179,6 +3207,8 @@ namespace MobileGL::MG_Backend::DirectVulkan {
                 Uint32 rectCopyCount = 0;
                 VkDeviceSize runningOffset = item.offset;
                 for (const auto& rect : item.rects) {
+                    // 与上面的staging打包一致，每个copy都满足实际格式块和4字节对齐。
+                    runningOffset = alignCopy(runningOffset);
                     const IntVec3 rectSize = {rect.hi.x() - rect.lo.x(), rect.hi.y() - rect.lo.y(),
                                               rect.hi.z() - rect.lo.z()};
                     const Uint32 rectDepth = static_cast<Uint32>(std::max(rectSize.z(), 1));
@@ -3237,9 +3267,9 @@ namespace MobileGL::MG_Backend::DirectVulkan {
                 }
             }
             if (isCombinedDepthStencil) {
-                const SizeT texelCount = static_cast<SizeT>(item.texelSize.x()) *
-                                         static_cast<SizeT>(item.texelSize.y()) *
-                                         static_cast<SizeT>(std::max(item.texelSize.z(), 1));
+                const SizeT texelCount = static_cast<SizeT>(item.sourceTexelSize.x()) *
+                                         static_cast<SizeT>(item.sourceTexelSize.y()) *
+                                         static_cast<SizeT>(std::max(item.sourceTexelSize.z(), 1));
                 VkBufferImageCopy depthCopy = copy;
                 depthCopy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
                 VkBufferImageCopy stencilCopy = copy;
