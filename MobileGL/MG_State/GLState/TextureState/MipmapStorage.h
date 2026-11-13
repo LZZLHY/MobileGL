@@ -13,6 +13,7 @@
 #include "MG_Util/Types.h"
 #include "MG_Util/Math/VectorTypes.h"
 #include "TextureTypes.h"
+#include "MipmapByteStorage.h"
 
 namespace MobileGL {
     namespace MG_State {
@@ -125,7 +126,8 @@ namespace MobileGL {
                 void InsertDirtyRect(Uint level, MipmapDirtyRegion incoming);
 
                 Vector<IntVec3> m_texelSizes;
-                Vector<Vector<Uint8>> m_data;
+                // 大 mip 使用按需零页；完整地址范围与所有有效像素仍由本 owner 独占。
+                Vector<MipmapByteStorage> m_data;
                 // 与m_data逐层对应。延迟状态下vector.size可以为0，纹理定义和view计算仍用此逻辑大小。
                 Vector<SizeT> m_byteSizes;
                 Vector<bool> m_isDirty;

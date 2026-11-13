@@ -54,12 +54,31 @@ int main() {
     Uint8 first[] = {7, 19, 31, 43};
     moved.UpdateSubData(0, {first, sizeof(first)});
     rejectAllocations = false;
+    // 旧版只是推迟到Map时memset整图；首次局部写入和跨页只读都不应物化128MiB。
+    const long mapped = residentKiB();
+    std::printf("first-map-and-small-write rss_delta_kib=%ld\n", mapped - before);
+    require(mapped - before < 32 * 1024, "first partial CPU access keeps untouched zero pages lazy");
     require(std::memcmp(data, first, sizeof(first)) == 0 && moved.IsDirty(0), "real CPU update and dirty state");
     require(moved.GetDirtyRegion(0).CoversWholeLevel({8192, 4096, 1}), "full update dirty bounds");
     moved.MarkDirty(0, false);
     moved.AllocateLevel(0, {{8192, 4096, 1}, bytes, true});
     require(moved.initialized(0) == bytes && std::memcmp(moved.MapData(0), first, sizeof(first)) == 0,
         "already initialized shadow is not discarded by the new option");
+
+    // 调用者可写整个已Map范围；收缩后重扩展不能把旧尾部像素重新暴露成非零。
+    data[4096] = 127;
+    data[bytes - 1] = 251;
+    moved.AllocateLevel(0, {{16, 16, 1}, 1024, true});
+    moved.AllocateLevel(0, {{8192, 4096, 1}, bytes, true});
+    data = static_cast<Uint8*>(moved.MapData(0));
+    require(std::memcmp(data, first, sizeof(first)) == 0 && data[4096] == 0 && data[bytes - 1] == 0,
+            "shrink/regrow preserves prefix and clears formerly visible tail");
+    // 实际扩容/移动时复制有效像素，不能把新映射的零值覆盖旧内容。
+    data[bytes - 1] = 29;
+    moved.AllocateLevel(0, {{8192, 8192, 1}, bytes * 2, true});
+    data = static_cast<Uint8*>(moved.MapData(0));
+    require(std::memcmp(data, first, sizeof(first)) == 0 && data[bytes - 1] == 29 && data[bytes * 2 - 1] == 0,
+            "growing allocation retains old bytes and zeroes new tail");
 
     moved.AllocateLevel(2, {{4, 4, 1}, 64, true});
     require(moved.GetLevelCount() == 3 && moved.GetByteSize(1) == 0 && moved.GetByteSize(2) == 64, "sparse level metadata");

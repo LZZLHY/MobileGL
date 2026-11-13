@@ -70,9 +70,9 @@ namespace MobileGL {
                     m_dirtyRects[level].clear();
                 }
                 auto& data = m_data[level];
-                // 不淘汰已经物化的有效像素。空层先保留容量而不清零，避免常见FBO空定义
-                // 立即触碰完整CPU页面；MapData随后只在已保留容量内初始化，不新增bad_alloc时点。
-                // reserve依然可能分配虚拟空间/allocator块，因此真实RSS收益须另在目标机验证。
+                // 不淘汰已写入的有效像素。空层先保留完整地址范围，MapData不新增分配点。
+                // 大 mip 的首次逻辑初始化复用内核零页，局部写入不再先 memset 整图；
+                // 小块/非POSIX仍用普通分配器，容量与初始化大小均不能替代真实RSS测量。
                 if (input.deferCpuInitialization && data.empty()) {
                     data.reserve(input.byteSize);
                 } else {
@@ -167,7 +167,8 @@ namespace MobileGL {
                 auto& targetData = m_data;
                 MOBILEGL_ASSERT(level < targetData.size(), "UpdateSubData: level out of range");
                 auto& levelData = targetData[level];
-                // AllocateLevel已申请足够capacity。只给从未CPU使用的层延迟初始化；
+                // AllocateLevel已申请足够capacity。首次大块映射只扩大逻辑可用范围，
+                // 尚未写入的页面由内核保证为零；已有像素和收缩后重扩展的零值语义保留。
                 // 不释放GPU上传后仍可能被CPU clear/copy/压缩读回消费的有效副本。
                 if (levelData.size() < m_byteSizes[level]) levelData.resize(m_byteSizes[level], 0);
                 return levelData.data();
