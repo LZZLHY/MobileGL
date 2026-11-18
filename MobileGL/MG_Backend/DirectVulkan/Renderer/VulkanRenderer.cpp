@@ -207,14 +207,9 @@ namespace MobileGL::MG_Backend::DirectVulkan {
         return texture != nullptr && MG_Util::GetBaseInternalFormatComponentCount(texture->GetFormat()) == 3;
     }
 
-    static Bool IsQuarterTurnPreTransform(VkSurfaceTransformFlagBitsKHR preTransform) {
-        return preTransform == VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR ||
-               preTransform == VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR;
-    }
-
     static IntVec2 ResolveDefaultFramebufferLogicalExtent(VkSurfaceTransformFlagBitsKHR preTransform,
                                                           const IntVec2& rawExtent) {
-        if (IsQuarterTurnPreTransform(preTransform)) {
+        if (IsQuarterTurnSurfaceTransform(preTransform)) {
             return {rawExtent.y(), rawExtent.x()};
         }
         return rawExtent;
@@ -257,7 +252,7 @@ namespace MobileGL::MG_Backend::DirectVulkan {
     static DefaultFramebufferRectMapping GetDefaultFramebufferRectMapping(
             VkSurfaceTransformFlagBitsKHR preTransform) {
         if (preTransform == VK_SURFACE_TRANSFORM_ROTATE_180_BIT_KHR) return {false, true};
-        if (IsQuarterTurnPreTransform(preTransform)) return {false, false};
+        if (IsQuarterTurnSurfaceTransform(preTransform)) return {false, false};
         return {true, false};
     }
 
@@ -476,7 +471,7 @@ namespace MobileGL::MG_Backend::DirectVulkan {
         Int viewportWidth = viewportState.z() > 0 ? viewportState.z() : logicalExtent.x();
         Int viewportHeight = viewportState.w() > 0 ? viewportState.w() : logicalExtent.y();
 
-        if (isDefaultFramebuffer && IsQuarterTurnPreTransform(preTransform)) {
+        if (isDefaultFramebuffer && IsQuarterTurnSurfaceTransform(preTransform)) {
             viewportX = ScaleFramebufferCoordinate(viewportX, logicalExtent.x(), framebufferExtent.x());
             viewportY = ScaleFramebufferCoordinate(viewportY, logicalExtent.y(), framebufferExtent.y());
             viewportWidth = ScaleFramebufferCoordinate(viewportWidth, logicalExtent.x(), framebufferExtent.x());
@@ -619,7 +614,7 @@ namespace MobileGL::MG_Backend::DirectVulkan {
     static VkRect2D MakeDefaultFramebufferScissorRect(const IntVec4& scissorBox,
                                                       const IntVec2& framebufferExtent,
                                                       VkSurfaceTransformFlagBitsKHR preTransform) {
-        if (!IsQuarterTurnPreTransform(preTransform)) {
+        if (!IsQuarterTurnSurfaceTransform(preTransform)) {
             return MapScissorRectToDefaultFramebuffer(MakeClampedScissorRect(scissorBox, framebufferExtent),
                                                       framebufferExtent, preTransform);
         }
@@ -2816,7 +2811,7 @@ void main() {
             return false;
         }
 
-        const Uint32 rawWidth = IsQuarterTurnPreTransform(preTransform) ? logicalHeight : logicalWidth;
+        const Uint32 rawWidth = IsQuarterTurnSurfaceTransform(preTransform) ? logicalHeight : logicalWidth;
         for (Uint32 outY = 0; outY < logicalHeight; ++outY) {
             for (Uint32 outX = 0; outX < logicalWidth; ++outX) {
                 Uint32 srcX = outX;
@@ -2951,7 +2946,7 @@ void main() {
             // quarter turn, which this renderer converts nothing for. Keeping the two in step
             // is the whole point - a fragment's window Y and the viewport that placed it must
             // agree on which end of the image they count from.
-            if (!IsQuarterTurnPreTransform(preTransform)) {
+            if (!IsQuarterTurnSurfaceTransform(preTransform)) {
                 flags |= ProgramFactory::CompileOptionBit::FragCoordYFlip;
             }
             switch (preTransform) {
@@ -3124,7 +3119,7 @@ void main() {
         MOBILEGL_ASSERT(m_programFactory != nullptr, "ProgramFactory creation failed.");
         // The swapchain already exists at this point (Initialize creates it first), so seed the
         // height the factory could not be told about from CreateSwapchain.
-        m_programFactory->SetDefaultFramebufferHeight(m_swapchainObject.GetExtent().height);
+        m_programFactory->SetDefaultFramebufferHeight(m_swapchainObject.GetSurfaceExtent().height);
         // Aging evictions (render passes and program entries) must purge the dependent
         // pipeline / compute-pipeline / descriptor-set caches in the same step; both
         // sweeps only run from the frame-boundary seams, long after initialization.
@@ -3215,6 +3210,27 @@ void main() {
             VK_VERIFY(vkGetPhysicalDeviceSurfaceSupportKHR(m_physicalDevice.handle,
                 static_cast<Uint32>(m_physicalDevice.queueFamilies.presentFamily), m_surface, &supported));
             if (!supported) throw RuntimeError("OHOS replacement surface cannot use the existing present queue");
+
+            // Callers may not know the EGL logical size when handing over a NativeWindow. A zero
+            // request must not become 1x1: read the geometry instead, but keep the old logical size
+            // when the reported extent is only the pre-rotation echo of it.
+            if (width == 0u || height == 0u) {
+                VkSurfaceCapabilitiesKHR caps{};
+                VK_VERIFY(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(m_physicalDevice.handle, m_surface, &caps),
+                          "OHOS retarget surface capabilities");
+                const bool oldKnown = oldWidth != 0u && oldHeight != 0u;
+                const bool echoOfOld = oldKnown &&
+                    ((caps.currentExtent.width == oldWidth && caps.currentExtent.height == oldHeight) ||
+                     (caps.currentExtent.width == oldHeight && caps.currentExtent.height == oldWidth));
+                if (echoOfOld) {
+                    m_config.SurfaceWidth = oldWidth;
+                    m_config.SurfaceHeight = oldHeight;
+                } else if (caps.currentExtent.width != 0u && caps.currentExtent.height != 0u &&
+                           caps.currentExtent.width != UINT32_MAX && caps.currentExtent.height != UINT32_MAX) {
+                    m_config.SurfaceWidth = caps.currentExtent.width;
+                    m_config.SurfaceHeight = caps.currentExtent.height;
+                }
+            }
         } catch (...) {
             if (m_surface) vkDestroySurfaceKHR(m_instance, m_surface, nullptr);
             m_surface = oldSurface;
@@ -3251,7 +3267,8 @@ void main() {
         m_presentSuspended = false;
         m_swapchainResizeRequested = false;
         m_uniformManager->BeginFrame(m_frameContext.GetCurrentFrameIndex());
-        MGLOG_I("OHOS surface retarget: device preserved, extent=%ux%u", width, height);
+        MGLOG_I("OHOS surface retarget: device preserved, request=%ux%u logical=%ux%u",
+                width, height, m_config.SurfaceWidth, m_config.SurfaceHeight);
         return true;
     }
 #endif
@@ -13658,7 +13675,7 @@ void main() {
         // module that lives outside the GL program, so the factory has to learn it here (and on
         // every recreation, which is the only way it can change).
         if (m_programFactory) {
-            m_programFactory->SetDefaultFramebufferHeight(m_swapchainObject.GetExtent().height);
+            m_programFactory->SetDefaultFramebufferHeight(m_swapchainObject.GetSurfaceExtent().height);
         }
     }
 
@@ -14098,7 +14115,8 @@ void main() {
         // the swapchain's own (quarter-turn swapped) extent here would report a difference on
         // every rotated frame and rebuild forever.
         const VkExtent2D builtFrom = m_swapchainObject.GetSurfaceExtent();
-        if (!SwapchainSurfaceChanged(surfaceCaps, builtFrom, m_swapchainObject.GetSurfaceTransform())) {
+        if (!SwapchainSurfaceChanged(surfaceCaps, builtFrom, m_swapchainObject.GetSurfaceTransform(),
+                                     m_swapchainObject.GetPreTransform())) {
             return false;
         }
         MGLOG_D("Swapchain out of date: surface %ux%u transform %u -> %ux%u transform %u",
@@ -14117,6 +14135,15 @@ void main() {
         m_config.SurfaceWidth = width;
         m_config.SurfaceHeight = height;
         m_swapchainResizeRequested = true;
+    }
+
+    void VulkanRenderer::RequestSwapchainResizeForPhysicalBuffer(Uint32 width, Uint32 height) {
+        // A quarter-turn swapchain owns a NativeWindow buffer in display space. EGL resize events
+        // report that buffer; convert it back to the logical surface before updating m_config.
+        if (IsQuarterTurnSurfaceTransform(m_swapchainObject.GetPreTransform())) {
+            std::swap(width, height);
+        }
+        RequestSwapchainResize(width, height);
     }
 
     void VulkanRenderer::SetSwapInterval(Int interval) {
