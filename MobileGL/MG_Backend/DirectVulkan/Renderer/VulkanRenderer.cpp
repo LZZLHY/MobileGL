@@ -14105,12 +14105,6 @@ void main() {
             VK_SUCCESS) {
             return false;
         }
-        // A driver-defined currentExtent (UINT32_MAX) means the surface takes its size from the
-        // swapchain, so there is nothing to compare against - the app's requested size wins and
-        // only an explicit RequestSwapchainResize can change it.
-        if (surfaceCaps.currentExtent.width == UINT32_MAX || surfaceCaps.currentExtent.height == UINT32_MAX) {
-            return false;
-        }
         // Compare in SURFACE space against the extent the live swapchain was created from. Using
         // the swapchain's own (quarter-turn swapped) extent here would report a difference on
         // every rotated frame and rebuild forever.
@@ -14135,15 +14129,6 @@ void main() {
         m_config.SurfaceWidth = width;
         m_config.SurfaceHeight = height;
         m_swapchainResizeRequested = true;
-    }
-
-    void VulkanRenderer::RequestSwapchainResizeForPhysicalBuffer(Uint32 width, Uint32 height) {
-        // A quarter-turn swapchain owns a NativeWindow buffer in display space. EGL resize events
-        // report that buffer; convert it back to the logical surface before updating m_config.
-        if (IsQuarterTurnSurfaceTransform(m_swapchainObject.GetPreTransform())) {
-            std::swap(width, height);
-        }
-        RequestSwapchainResize(width, height);
     }
 
     void VulkanRenderer::SetSwapInterval(Int interval) {

@@ -356,10 +356,6 @@ namespace MobileGL::MG_Backend::DirectVulkan {
         Bool ResolveOcclusionQueryResult(const Vector<Uint32>& slots, Uint64& outSamples);
 
         void RequestSwapchainResize(Uint32 width, Uint32 height);
-        // EGL window resize reports the NativeWindow's display-space buffer. With a quarter-turn
-        // swapchain that buffer is the transpose of GL's logical surface, so normalize before it
-        // can poison the next CreateSwapchain request.
-        void RequestSwapchainResizeForPhysicalBuffer(Uint32 width, Uint32 height);
         // eglSwapInterval. Records the request; Present rebuilds the swapchain for it once the
         // current frame is on screen, and only when it maps to a different present mode. A
         // renderer created without an app window ignores it: its surface (headless, or an
