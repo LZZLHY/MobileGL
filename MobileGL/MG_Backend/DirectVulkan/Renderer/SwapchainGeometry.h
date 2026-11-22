@@ -20,6 +20,18 @@ namespace MobileGL::MG_Backend::DirectVulkan {
                transform == VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR;
     }
 
+    // OHOS WSI 会反转缓冲区变换方向。只在支持反向档位时补偿，否则保留原有效变换。
+    inline VkSurfaceTransformFlagBitsKHR ChooseOhosSwapchainPreTransform(
+            VkSurfaceTransformFlagsKHR supportedTransforms, VkSurfaceTransformFlagBitsKHR proposed) {
+        if (!IsQuarterTurnSurfaceTransform(proposed)) {
+            return proposed;
+        }
+        const auto opposite = proposed == VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR
+            ? VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR
+            : VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR;
+        return (supportedTransforms & opposite) != 0 ? opposite : proposed;
+    }
+
     inline SwapchainGeometry ChooseSwapchainGeometry(const VkSurfaceCapabilitiesKHR& caps,
                                                      VkExtent2D requested, bool preferIdentity) {
         const bool driverDefined =

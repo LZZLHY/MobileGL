@@ -225,10 +225,9 @@ namespace MobileGL::MG_Backend::DirectVulkan {
         // the surface is large (prevalidate "ConvertCompositionStrategy ... disabled by Intercept
         // ID: 1_4"), while 180 degrees - same width and height - is accepted: the buffer has to
         // follow the window instead of asking the compositor to rotate it.
-        if (IsQuarterTurnSurfaceTransform(selectedPreTransform)) {
-            selectedPreTransform = selectedPreTransform == VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR
-                ? VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR
-                : VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR;
+        selectedPreTransform = ChooseOhosSwapchainPreTransform(swapchainCaps.supportedTransforms, selectedPreTransform);
+        if (IsQuarterTurnSurfaceTransform(selectedPreTransform) && selectedPreTransform == geometry.preTransform) {
+            MGLOG_I("WSI opposite quarter-turn unavailable; using the supported surface transform");
         }
 #endif
         createInfo.imageExtent = geometry.imageExtent;
