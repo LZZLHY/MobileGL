@@ -444,7 +444,7 @@ namespace MobileGL::MG_Backend::DirectVulkan {
             return false;
         }
         if (pVulkanRenderer && m_eglSurface == surface) {
-            pVulkanRenderer->RequestSwapchainResize(width, height);
+            pVulkanRenderer->RequestSwapchainResizeForPhysicalBuffer(width, height);
         }
         return true;
     }
