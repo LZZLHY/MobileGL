@@ -209,35 +209,16 @@ namespace MobileGL::MG_Backend::DirectVulkan {
         createInfo.minImageCount = targetImageCount;
         createInfo.imageFormat = pickedSurfaceFormat.format;
         createInfo.imageColorSpace = pickedSurfaceFormat.colorSpace;
-        // Pre-rotate everywhere: the app renders the quarter-turn image and the buffer becomes the
-        // display-oriented allocation, so the compositor consumes it without a second rotation.
-        // ChooseSwapchainGeometry anchors the transposed currentExtent echo on OHOS, which is what
-        // makes this stable there instead of oscillating portrait/landscape.
-        constexpr bool preferIdentity = false;
-        const auto geometry = ChooseSwapchainGeometry(swapchainCaps, desiredExtent, preferIdentity);
-        auto selectedPreTransform = geometry.preTransform;
-#if defined(VK_USE_PLATFORM_OHOS)
-        // OHOS rotation is counter-clockwise and the swapchain layer stores the buffer metadata
-        // through InvertTransformToNative (swapchain_layer.cpp), so the native quarter turn that
-        // lands on the buffer is the mirror of currentTransform. Send the opposite quarter so the
-        // buffer cancels the ArkUI surface rotation instead of doubling it.
-        // A layer whose buffer still needs a quarter turn is refused by the vendor HWC policy once
-        // the surface is large (prevalidate "ConvertCompositionStrategy ... disabled by Intercept
-        // ID: 1_4"), while 180 degrees - same width and height - is accepted: the buffer has to
-        // follow the window instead of asking the compositor to rotate it.
-        if (IsQuarterTurnSurfaceTransform(selectedPreTransform)) {
-            selectedPreTransform = selectedPreTransform == VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR
-                ? VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR
-                : VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR;
-        }
-#endif
+        // currentTransform already encodes the platform orientation in Vulkan coordinates.
+        // Use the same transform for rendering and for presentation. OHOS converts it back
+        // to the NativeWindow convention and checks it against the window's transform hint.
+        const auto geometry = ChooseSwapchainGeometry(swapchainCaps, desiredExtent, false);
         createInfo.imageExtent = geometry.imageExtent;
         const VkExtent2D defaultFramebufferExtent = geometry.surfaceExtent;
-        MGLOG_I("WSI geometry: surface=%ux%u image=%ux%u supported=0x%x current=0x%x pre=0x%x selected=0x%x",
+        MGLOG_I("WSI geometry: surface=%ux%u image=%ux%u supported=0x%x current=0x%x pre=0x%x",
                 geometry.surfaceExtent.width, geometry.surfaceExtent.height,
                 geometry.imageExtent.width, geometry.imageExtent.height,
-                swapchainCaps.supportedTransforms, swapchainCaps.currentTransform, geometry.preTransform,
-                selectedPreTransform);
+                swapchainCaps.supportedTransforms, swapchainCaps.currentTransform, geometry.preTransform);
 
         createInfo.imageArrayLayers = 1;
         const VkImageUsageFlags requiredImageUsage =
@@ -264,7 +245,7 @@ namespace MobileGL::MG_Backend::DirectVulkan {
             createInfo.queueFamilyIndexCount = 0;
             createInfo.pQueueFamilyIndices = nullptr;
         }
-        createInfo.preTransform = selectedPreTransform;
+        createInfo.preTransform = geometry.preTransform;
         MGLOG_I("Set swapchain preTransform = %s", string_VkSurfaceTransformFlagBitsKHR(createInfo.preTransform));
         const VkCompositeAlphaFlagBitsKHR compositeAlphaCandidates[] = {
             VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,

@@ -200,6 +200,12 @@ configure_file(
 
 include_directories(${CMAKE_BINARY_DIR}/generated)
 
+if(CMAKE_SYSTEM_NAME STREQUAL "OHOS")
+    # __FILE__ in graphics diagnostics must identify the source, not the build machine.
+    add_compile_options("-ffile-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}=MobileGL"
+                        "-ffile-prefix-map=${CMAKE_CURRENT_BINARY_DIR}=MobileGL-build")
+endif()
+
 set(ENABLE_RTTI                ON  CACHE BOOL "Enables RTTI (will be took by glslang)" FORCE)
 
 set(ENABLE_GLSLANG_BINARIES    OFF CACHE BOOL "Enable glslangValidator/spirv-remap" FORCE)
@@ -227,6 +233,29 @@ set(SPIRV_REFLECT_INSTALL        OFF CACHE BOOL "Whether to install" FORCE)
 # add_subdirectory(3rdparty/DiligentCore)
 add_subdirectory(3rdparty/glslang)
 add_subdirectory(3rdparty/SPIRV-Cross)
+if(CMAKE_SYSTEM_NAME STREQUAL "OHOS")
+    # The upstream C API embeds configure time and git describe (which varies with
+    # the available tags). Use the dependency's immutable commit metadata instead.
+    function(mobilegl_record_spirv_cross_revision)
+        set(source "${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/SPIRV-Cross")
+        set(spirv-cross-build-version "unknown")
+        set(spirv-cross-timestamp "unknown")
+        if(EXISTS "${source}/.git")
+            execute_process(COMMAND git show -s "--format=%H|%cI" HEAD
+                WORKING_DIRECTORY "${source}" RESULT_VARIABLE status
+                OUTPUT_VARIABLE identity OUTPUT_STRIP_TRAILING_WHITESPACE)
+            if(NOT status EQUAL 0 OR NOT identity MATCHES "^([0-9a-f]+)[|](.+)$")
+                message(FATAL_ERROR "Cannot identify the checked-out SPIRV-Cross revision")
+            endif()
+            set(spirv-cross-build-version "${CMAKE_MATCH_1}")
+            set(spirv-cross-timestamp "${CMAKE_MATCH_2}")
+        endif()
+        configure_file("${source}/cmake/gitversion.in.h"
+            "${CMAKE_CURRENT_BINARY_DIR}/3rdparty/SPIRV-Cross/gitversion.h" @ONLY)
+    endfunction()
+    mobilegl_record_spirv_cross_revision()
+endif()
+
 add_subdirectory(3rdparty/VulkanMemoryAllocator)
 add_subdirectory(3rdparty/Vulkan-Headers)
 add_subdirectory(3rdparty/Vulkan-Utility-Libraries)

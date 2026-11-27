@@ -20,15 +20,25 @@ namespace MobileGL::MG_Backend::DirectVulkan {
                transform == VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR;
     }
 
+    // Only OHOS reports the allocated NativeWindow buffer back as the surface extent.
+    enum class SurfaceExtentSource { Window, AllocatedBuffer };
+#if defined(VK_USE_PLATFORM_OHOS)
+    constexpr auto kPlatformExtentSource = SurfaceExtentSource::AllocatedBuffer;
+#else
+    constexpr auto kPlatformExtentSource = SurfaceExtentSource::Window;
+#endif
+
     inline SwapchainGeometry ChooseSwapchainGeometry(const VkSurfaceCapabilitiesKHR& caps,
-                                                     VkExtent2D requested, bool preferIdentity) {
+                                                     VkExtent2D requested, bool preferIdentity,
+                                                     SurfaceExtentSource extentSource = kPlatformExtentSource) {
         const bool driverDefined =
             caps.currentExtent.width == UINT32_MAX || caps.currentExtent.height == UINT32_MAX;
         VkExtent2D surface = caps.currentExtent;
         // With pre-rotation the quarter-turn buffer is the transpose of the GL logical surface.
         // OHOS reports that allocated buffer back through currentExtent; accepting the echo would
         // transpose the logical size forever. A real resize changes the echo away from this pair.
-        const bool transposedEcho = !preferIdentity && !driverDefined &&
+        const bool transposedEcho = extentSource == SurfaceExtentSource::AllocatedBuffer &&
+            !preferIdentity && !driverDefined &&
             IsQuarterTurnSurfaceTransform(caps.currentTransform) &&
             surface.width == requested.height && surface.height == requested.width &&
             surface.width != surface.height;
@@ -47,15 +57,17 @@ namespace MobileGL::MG_Backend::DirectVulkan {
 
     inline bool SwapchainSurfaceChanged(const VkSurfaceCapabilitiesKHR& caps, VkExtent2D builtFrom,
                                        VkSurfaceTransformFlagBitsKHR observedTransform,
-                                       VkSurfaceTransformFlagBitsKHR builtPreTransform) {
-        if (caps.currentExtent.width == UINT32_MAX || caps.currentExtent.height == UINT32_MAX) return false;
+                                       VkSurfaceTransformFlagBitsKHR builtPreTransform,
+                                       SurfaceExtentSource extentSource = kPlatformExtentSource) {
+        // Variable extents leave the size to the app; orientation can still change independently.
         if (caps.currentTransform != observedTransform) return true;
+        if (caps.currentExtent.width == UINT32_MAX || caps.currentExtent.height == UINT32_MAX) return false;
         if (caps.currentExtent.width == builtFrom.width && caps.currentExtent.height == builtFrom.height) {
             return false;
         }
         // The quarter-turn buffer is reported in the transposed surface space. Treat that echo
         // as unchanged only while the pre-transform that created the buffer is still live.
-        if (IsQuarterTurnSurfaceTransform(builtPreTransform) &&
+        if (extentSource == SurfaceExtentSource::AllocatedBuffer && IsQuarterTurnSurfaceTransform(builtPreTransform) &&
             caps.currentExtent.width == builtFrom.height && caps.currentExtent.height == builtFrom.width) {
             return false;
         }
